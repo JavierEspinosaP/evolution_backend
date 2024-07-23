@@ -1,4 +1,3 @@
-// logic.js
 import { v4 as uuidv4 } from 'uuid';
 import { Food, Creature } from './classes.js';
 
@@ -109,6 +108,11 @@ function updateAndDisplayCreatures() {
         c.eat(state.food);
         c.age();
         c.checkMitosis(colorCounts);
+
+        if (c.size <= c.minSize) {
+            state.creatures.splice(i, 1); // Eliminar criaturas muertas
+            continue;
+        }
 
         for (let j = state.creatures.length - 1; j >= 0; j--) {
             if (i !== j && c.eatCreature(state.creatures[j])) {

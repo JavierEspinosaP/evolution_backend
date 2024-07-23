@@ -1,4 +1,3 @@
-// classes.js
 import { v4 as uuidv4 } from 'uuid';
 import { state } from './logic.js';
 
@@ -47,57 +46,30 @@ export class Creature {
         this.energy = 100;
         this.olfatoRange = map(this.size, this.minSize, 100, 75, 250);
         this.lastDirection = { x: 0, y: 0 };
-        this.actionHistory = [];
         this.foodEaten = 0;
         this.preyEaten = 0;
         this.reproduced = false;
         this.ageCounter = 0;
         this.borderRepulsionAccum = { x: 0, y: 0 };
-        this.inputHistory = [];
-        this.outputHistory = [];
     }
 
     applyForce(force) {
-        this.acc.x += force.x;
-        this.acc.y += force.y;
+        const smoothingFactor = 0.2;
+        this.acc.x += force.x * smoothingFactor;
+        this.acc.y += force.y * smoothingFactor;
     }
+    
 
     move(food, creatures) {
         this.ageCounter++;
         let { closestNormalFood, closestGrowthFood, closestPrey, closestPredator } = this.findClosestEntities(food, creatures);
         let { speed, action } = this.determineAction(closestNormalFood, closestGrowthFood, closestPrey, closestPredator);
 
-        this.saveInputOutput(closestNormalFood, closestGrowthFood, closestPrey, closestPredator, speed, action);
-
         this.performAction(action, closestNormalFood, closestGrowthFood, closestPrey, closestPredator, speed);
         this.updateVelocityAndPosition();
         this.handleBorders();
         this.reduceEnergy();
         this.checkEnergy();
-    }
-
-    saveInputOutput(closestNormalFood, closestGrowthFood, closestPrey, closestPredator, speed, action) {
-        let distanceToBorder = Math.min(this.pos.x, 1900 - this.pos.x, this.pos.y, 800 - this.pos.y);
-
-        let input = {
-            distanceToNormalFood: closestNormalFood ? this.dist(this.pos, closestNormalFood.pos) : Infinity,
-            distanceToGrowthFood: closestGrowthFood ? this.dist(this.pos, closestGrowthFood.pos) : Infinity,
-            distanceToPrey: closestPrey ? this.dist(this.pos, closestPrey.pos) : Infinity,
-            distanceToPredator: closestPredator ? this.dist(this.pos, closestPredator.pos) : Infinity,
-            energy: this.energy,
-            size: this.size,
-            distanceToBorder: distanceToBorder,
-            season: ["spring", "summer", "autumn", "winter"].indexOf(state.season)
-        };
-
-        let output = {
-            velX: this.vel.x,
-            velY: this.vel.y
-        };
-
-        this.inputHistory.push(input);
-        this.outputHistory.push(output);
-        this.actionHistory.push({ input, output });
     }
 
     findClosestEntities(food, creatures) {
@@ -266,7 +238,6 @@ export class Creature {
             if (this.ageCounter > state.longestLivingDuration) {
                 state.longestLivingDuration = this.ageCounter;
                 state.longestLivingCreatures = [this];
-                state.history = [...this.actionHistory];
                 console.log(`Nuevo récord de longevidad: ${this.ageCounter} ticks`);
             } else if (this.ageCounter === state.longestLivingDuration) {
                 state.longestLivingCreatures.push(this);
@@ -316,7 +287,6 @@ export class Creature {
         this.timeSinceLastMeal = 0;
         this.energy += other.size * 50;
         this.preyEaten++;
-        if (other.actionHistory.length > 0) state.history.push(...other.actionHistory);
     }
 
     age() {
@@ -397,5 +367,5 @@ function getRandomColor() {
 }
 
 function map(value, start1, stop1, start2, stop2) {
-    return ((value - start1) / (stop1 - start1)) * (stop2 - start2) + start2;
+    return ((value - start1) / (stop1 - start1)) * (stop2 - stop2) + start2;
 }

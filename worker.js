@@ -1,4 +1,3 @@
-// worker.js
 import { parentPort } from 'worker_threads';
 import { updateState, state } from './logic.js';
 
@@ -10,7 +9,7 @@ parentPort.on('message', (message) => {
             intervalId = setInterval(() => {
                 updateState();
                 parentPort.postMessage(state);
-            }, 30);
+            }, 15);
         }
     } else if (message.action === 'stop') {
         if (intervalId) {
