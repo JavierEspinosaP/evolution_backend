@@ -1,9 +1,11 @@
+// server.js
 import { writeHeapSnapshot } from 'v8';
 import express from 'express';
 import cors from 'cors';
 import { WebSocketServer } from 'ws';
 import { Worker } from 'worker_threads';
 import { state, updateState } from './logic.js';
+import zlib from 'zlib';
 
 const app = express();
 const port = 3000;
@@ -21,12 +23,6 @@ setInterval(() => {
     console.log(`Heap Total: ${memoryUsage.heapTotal / 1024 / 1024} MB`);
     console.log(`Heap Used: ${memoryUsage.heapUsed / 1024 / 1024} MB`);
     console.log(`External: ${memoryUsage.external / 1024 / 1024} MB`);
-
-    // Crear un snapshot de memoria cuando RSS es mayor a 500 MB (por ejemplo)
-    if (memoryUsage.rss > 500 * 1024 * 1024) {
-        const snapshot = writeHeapSnapshot();
-        console.log(`Heap snapshot written to ${snapshot}`);
-    }
 }, 1000);
 
 const wss = new WebSocketServer({ server });
@@ -37,10 +33,18 @@ const connections = new Set();
 const worker = new Worker('./worker.js');
 
 worker.on('message', (updatedState) => {
-    // Enviar el estado actualizado a todas las conexiones activas
-    connections.forEach(ws => {
-        if (ws.readyState === ws.OPEN) {
-            ws.send(JSON.stringify(updatedState));
+    const message = JSON.stringify(updatedState);
+    // Comprimir el mensaje para reducir el uso de memoria y ancho de banda
+    zlib.deflate(message, (err, buffer) => {
+        if (!err) {
+            // Enviar el estado actualizado a todas las conexiones activas
+            connections.forEach(ws => {
+                if (ws.readyState === ws.OPEN) {
+                    ws.send(buffer);
+                }
+            });
+        } else {
+            console.error('Error compressing message:', err);
         }
     });
 });
@@ -49,7 +53,14 @@ worker.on('message', (updatedState) => {
 worker.postMessage({ action: 'start' });
 
 wss.on('connection', ws => {
-    ws.send(JSON.stringify(state));
+    // Enviar estado inicial comprimido
+    zlib.deflate(JSON.stringify(state), (err, buffer) => {
+        if (!err) {
+            ws.send(buffer);
+        } else {
+            console.error('Error compressing initial state:', err);
+        }
+    });
     connections.add(ws);
 
     ws.on('close', () => {

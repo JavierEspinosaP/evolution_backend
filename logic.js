@@ -8,7 +8,6 @@ export const state = {
     season: "spring",
     food: [],
     creatures: [],
-    history: [],
     colorTraits: {},
     longestLivingCreatures: [],
     longestLivingDuration: 0,
@@ -19,7 +18,6 @@ export const state = {
     seasonCounter: 0,
     seasonDuration: 3600, // 1 minuto en frames (60 FPS)
     yearDuration: 3600 * 4, // 4 estaciones
-    historySaved: false,
     timeCounter: 0 // Nuevo contador de tiempo
 };
 
