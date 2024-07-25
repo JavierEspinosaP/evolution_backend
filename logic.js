@@ -23,7 +23,7 @@ export const state = {
 
 // Inicializa las criaturas y la comida
 function initializeCreaturesAndFood() {
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 1; i++) {
         state.creatures.push(new Creature(11, undefined, undefined, 1.0, uuidv4())); // Aumentar tamaño inicial en un 10%
     }
     for (let i = 0; i < 50; i++) {

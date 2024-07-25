@@ -12,10 +12,12 @@
   "license": "ISC",
   "dependencies": {
     "@fastify/cors": "^7.0.0",
+    "@tensorflow/tfjs": "^4.20.0",
     "cluster": "^0.7.7",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "fastify": "^3.29.5",
+    "flatted": "^3.3.1",
     "nodemon": "^3.1.4",
     "os": "^0.1.2",
     "redis": "^4.6.15",
