@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { Food, Creature } from './classes.js';
 
+
 export const state = {
     currentMutationColor: null,
     mutationCount: 0,
@@ -23,7 +24,7 @@ export const state = {
 
 // Inicializa las criaturas y la comida
 function initializeCreaturesAndFood() {
-    for (let i = 0; i < 1; i++) {
+    for (let i = 0; i < 10; i++) {
         state.creatures.push(new Creature(11, undefined, undefined, 1.0, uuidv4())); // Aumentar tamaño inicial en un 10%
     }
     for (let i = 0; i < 50; i++) {
@@ -102,7 +103,8 @@ function updateAndDisplayCreatures() {
 
     for (let i = state.creatures.length - 1; i >= 0; i--) {
         let c = state.creatures[i];
-        c.move(state.food, state.creatures);
+        c.act(state.food, state.creatures);
+        c.updateVelocityAndPosition();
         c.eat(state.food);
         c.age();
         c.checkMitosis(colorCounts);
@@ -135,4 +137,34 @@ function countColors(creatures) {
 export function updateMutationColorAndCount(newColor) {
     state.currentMutationColor = newColor;
     state.mutationCount = 0;
+}
+
+export function prepareStateForClient() {
+    const cleanState = {
+        ...state,
+        creatures: state.creatures.map(creature => ({
+            id: creature.id,
+            pos: {
+                x: creature.pos.x || 0,
+                y: creature.pos.y || 0,
+            },
+            size: creature.size,
+            color: creature.color,
+            energy: creature.energy,
+            foodEaten: creature.foodEaten,
+            preyEaten: creature.preyEaten,
+            ageCounter: creature.ageCounter,
+        })),
+        food: state.food.map(foodItem => ({
+            id: foodItem.id,
+            pos: {
+                x: foodItem.pos.x || 0,
+                y: foodItem.pos.y || 0,
+            },
+            type: foodItem.type,
+        }))
+    };
+    
+    // Usar JSON.stringify en lugar de Flatted.stringify
+    return JSON.stringify(cleanState);
 }
