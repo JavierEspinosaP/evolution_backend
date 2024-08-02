@@ -1,24 +1,146 @@
-import { v4 as uuidv4 } from 'uuid';
-import { state } from './logic.js';
-import * as tf from '@tensorflow/tfjs';
+import { v4 as uuidv4 } from "uuid";
+import { state } from "./logic.js";
+import * as tf from "@tensorflow/tfjs";
 
 class NeuralNetwork {
-  constructor(inputSize, outputSize, existingModel = null) {
-    if (existingModel) {
-      this.model = existingModel;
-    } else {
-      this.model = tf.sequential();
-      this.model.add(tf.layers.dense({ units: 32, inputShape: [inputSize], activation: 'relu', dtype: 'float32' }));
-      this.model.add(tf.layers.dense({ units: 16, activation: 'relu', dtype: 'float32' }));
-      this.model.add(tf.layers.dense({ units: outputSize, activation: 'tanh', dtype: 'float32' }));
-      this.model.compile({ optimizer: 'sgd', loss: 'meanSquaredError' });
+  constructor(inputSize, outputSize, existingModel) {
+    this.model = null;
+    this.id = null;
+    this.isTraining = false;
+
+    this.initialize(inputSize, outputSize, existingModel);
+  }
+
+  async initialize(inputSize, outputSize, existingModel = null) {
+    // console.log("Initializing new model...");
+    this.model = tf.sequential();
+    this.model.add(
+      tf.layers.dense({
+        units: 64, // Aumentar el número de neuronas
+        inputShape: [inputSize],
+        activation: "relu",
+        dtype: "float32",
+      })
+    );
+    this.model.add(
+      tf.layers.dense({ units: 32, activation: "relu", dtype: "float32" }) // Agregar más capas y neuronas
+    );
+    this.model.add(
+      tf.layers.dense({
+        units: 16, // Capa adicional
+        activation: "relu",
+        dtype: "float32",
+      })
+    );
+    this.model.add(
+      tf.layers.dense({
+        units: outputSize,
+        activation: "tanh",
+        dtype: "float32",
+      })
+    );
+    this.model.compile({ optimizer: "adam", loss: "meanSquaredError" }); // Usar 'adam' como optimizador
+
+    if (existingModel && existingModel.layers && existingModel.layers.length > 0) {
+      // console.log("Applying existing model weights...");
+      const weightTensors = existingModel.getWeights();
+      this.model.setWeights(weightTensors);
     }
-    this.isTraining = false; // Nueva propiedad para rastrear el estado de entrenamiento
+    this.id = uuidv4();
+    // console.log(`Initialized with ID: ${this.id}`);
+  }
+
+  async initializeWithWeights(inputSize, outputSize, weights = null) {
+    // console.log("Initializing model with specific weights...");
+    this.model = tf.sequential();
+    this.model.add(
+      tf.layers.dense({
+        units: 64,
+        inputShape: [inputSize],
+        activation: "relu",
+        dtype: "float32",
+      })
+    );
+    this.model.add(
+      tf.layers.dense({ units: 32, activation: "relu", dtype: "float32" })
+    );
+    this.model.add(
+      tf.layers.dense({ units: 16, activation: "relu", dtype: "float32" })
+    );
+    this.model.add(
+      tf.layers.dense({
+        units: outputSize,
+        activation: "tanh",
+        dtype: "float32",
+      })
+    );
+    this.model.compile({ optimizer: "adam", loss: "meanSquaredError" });
+
+    if (weights) {
+      const weightTensors = weights.map(w => tf.tensor(w));
+      this.model.setWeights(weightTensors);
+    }
+
+    this.id = uuidv4();
+    // console.log(`Initialized with weights, ID: ${this.id}`);
+  }
+
+  async mutate(rate) {
+    try {
+      for (let layer of this.model.layers) {
+        const weights = layer.getWeights();
+        const newWeights = [];
+        for (let tensor of weights) {
+          let values = await tensor.data();
+          for (let i = 0; i < values.length; i++) {
+            if (Math.random() < rate) {
+              values[i] += Math.random() * 2 - 1;
+            }
+          }
+          const newTensor = tf.tensor(values, tensor.shape, "float32");
+          newWeights.push(newTensor);
+        }
+        layer.setWeights(newWeights);
+      }
+    } catch (error) {
+      console.error("Error mutating model:", error);
+    }
+  }
+
+  async train(inputs, targets) {
+    if (inputs.length === 0 || targets.length === 0) {
+      console.error("Empty inputs or targets array in train method");
+      return;
+    }
+    if (this.isTraining) {
+      console.warn("Training is already in progress");
+      return;
+    }
+    this.isTraining = true; // Establecer el estado de entrenamiento en verdadero
+    const inputTensor = tf.tensor2d(
+      inputs,
+      [inputs.length, inputs[0].length],
+      "float32"
+    );
+    const targetTensor = tf.tensor2d(
+      targets,
+      [targets.length, targets[0].length],
+      "float32"
+    );
+    try {
+      await this.model.fit(inputTensor, targetTensor, { epochs: 1 });
+    } catch (error) {
+      console.error("Error during training:", error);
+    } finally {
+      inputTensor.dispose();
+      targetTensor.dispose();
+      this.isTraining = false; // Restablecer el estado de entrenamiento en falso
+    }
   }
 
   predict(inputs) {
     return tf.tidy(() => {
-      const inputTensor = tf.tensor2d([inputs], [1, inputs.length], 'float32');
+      const inputTensor = tf.tensor2d([inputs], [1, inputs.length], "float32");
       const outputTensor = this.model.predict(inputTensor);
       const outputs = outputTensor.dataSync();
       inputTensor.dispose();
@@ -26,72 +148,19 @@ class NeuralNetwork {
       return outputs;
     });
   }
-
-  async mutate(rate) {
-    const weights = this.model.getWeights();
-    const newWeights = [];
-    for (let tensor of weights) {
-      let values = await tensor.data();
-      for (let i = 0; i < values.length; i++) {
-        if (Math.random() < rate) {
-          values[i] += Math.random() * 2 - 1;
-        }
-      }
-      const newTensor = tf.tensor(values, tensor.shape, 'float32');
-      newWeights.push(newTensor);
-    }
-    this.model.setWeights(newWeights);
-  }
-
-  crossover(partner) {
-    const weightsA = this.model.getWeights();
-    const weightsB = partner.model.getWeights();
-    const newWeights = [];
-    for (let i = 0; i < weightsA.length; i++) {
-      const shape = weightsA[i].shape;
-      const valuesA = weightsA[i].dataSync();
-      const valuesB = weightsB[i].dataSync();
-      const newValues = [];
-      for (let j = 0; j < valuesA.length; j++) {
-        newValues[j] = Math.random() < 0.5 ? valuesA[j] : valuesB[j];
-      }
-      newWeights.push(tf.tensor(newValues, shape, 'float32'));
-    }
-    const child = new NeuralNetwork(weightsA[0].shape[0], weightsA[weightsA.length - 1].shape[0], this.model);
-    child.model.setWeights(newWeights);
-    return child;
-  }
-
-  async train(inputs, targets) {
-    if (inputs.length === 0 || targets.length === 0) {
-      console.error('Empty inputs or targets array in train method');
-      return;
-    }
-    if (this.isTraining) {
-      console.warn('Training is already in progress');
-      return;
-    }
-    this.isTraining = true; // Establecer el estado de entrenamiento en verdadero
-    const inputTensor = tf.tensor2d(inputs, [inputs.length, inputs[0].length], 'float32');
-    const targetTensor = tf.tensor2d(targets, [targets.length, targets[0].length], 'float32');
-    try {
-      await this.model.fit(inputTensor, targetTensor, { epochs: 1 });
-    } catch (error) {
-      console.error('Error during training:', error);
-    } finally {
-      inputTensor.dispose();
-      targetTensor.dispose();
-      this.isTraining = false; // Restablecer el estado de entrenamiento en falso
-    }
-  }
 }
+
+
 
 export class Food {
   constructor() {
     this.id = uuidv4();
     this.pos = { x: Math.random() * 1900, y: Math.random() * 800 };
-    this.type = Math.random() < 0.5 ? 'normal' : 'growth';
-    this.vel = { x: (Math.random() - 0.5) * 0.25, y: (Math.random() - 0.5) * 0.25 };
+    this.type = Math.random() < 0.5 ? "normal" : "growth";
+    this.vel = {
+      x: (Math.random() - 0.5) * 0.25,
+      y: (Math.random() - 0.5) * 0.25,
+    };
     this.lifeTime = 3600; // Vida de 1 minuto (60 FPS * 60 segundos)
   }
 
@@ -117,7 +186,14 @@ export class Food {
 }
 
 export class Creature {
-  constructor(size = 11, pos = { x: Math.random() * 1900, y: Math.random() * 800 }, color = getInitialColor(), speedMultiplier = 1.0, id = uuidv4(), existingModel = null) {
+  constructor(
+    size = 11,
+    pos = { x: Math.random() * 1900, y: Math.random() * 800 },
+    color = getInitialColor(),
+    speedMultiplier = 1.0,
+    id = uuidv4(),
+    existingModel = null
+  ) {
     this.id = id;
     this.pos = pos;
     this.vel = { x: 0, y: 0 };
@@ -135,13 +211,23 @@ export class Creature {
     this.preyEaten = 0;
     this.reproduced = false;
     this.ageCounter = 0;
+    this.reproductions = 0; // Nuevo atributo para contar reproducciones
     this.borderRepulsionAccum = { x: 0, y: 0 };
     this.brain = new NeuralNetwork(15, 2, existingModel); // Reutiliza el modelo si se proporciona
+    if (!this.brain) {
+      console.error("Error initializing brain for creature:", this.id);
+    }
     this.reward = 0;
     this.touchingBorder = 0; // Nuevo input booleano
     this.cornerTimer = 0; // Tiempo en la esquina
     this.immobileTimer = 0; // Tiempo inmóvil
     this.borderTimer = 0; // Tiempo tocando el borde
+  }
+
+  async initializeBrainWithWeights(weights, brainId) {
+    this.brain = new NeuralNetwork(15, 2);
+    await this.brain.initializeWithWeights(15, 2, weights);
+    this.brain.id = brainId;
   }
 
   applyForce(force) {
@@ -161,12 +247,21 @@ export class Creature {
 
     if (closestFood) {
       const inputs = [
-        this.pos.x, this.pos.y,
-        closestFood.pos.x, closestFood.pos.y,
-        closestPrey ? closestPrey.pos.x : 0, closestPrey ? closestPrey.pos.y : 0,
-        closestPredator ? closestPredator.pos.x : 0, closestPredator ? closestPredator.pos.y : 0,
-        this.size, this.energy, this.touchingBorder,
-        distanceToLeft, distanceToRight, distanceToTop, distanceToBottom
+        this.pos.x,
+        this.pos.y,
+        closestFood.pos.x,
+        closestFood.pos.y,
+        closestPrey ? closestPrey.pos.x : 0,
+        closestPrey ? closestPrey.pos.y : 0,
+        closestPredator ? closestPredator.pos.x : 0,
+        closestPredator ? closestPredator.pos.y : 0,
+        this.size,
+        this.energy,
+        this.touchingBorder,
+        distanceToLeft,
+        distanceToRight,
+        distanceToTop,
+        distanceToBottom,
       ];
       const [dx, dy] = this.brain.predict(inputs);
       this.applyForce({ x: dx, y: dy });
@@ -220,8 +315,14 @@ export class Creature {
     const previousPos = { ...this.pos };
     this.vel.x += this.acc.x;
     this.vel.y += this.acc.y;
-    this.vel.x = Math.min(Math.max(this.vel.x, -this.speedMultiplier * state.frameRateMultiplier), this.speedMultiplier * state.frameRateMultiplier);
-    this.vel.y = Math.min(Math.max(this.vel.y, -this.speedMultiplier * state.frameRateMultiplier), this.speedMultiplier * state.frameRateMultiplier);
+    this.vel.x = Math.min(
+      Math.max(this.vel.x, -this.speedMultiplier * state.frameRateMultiplier),
+      this.speedMultiplier * state.frameRateMultiplier
+    );
+    this.vel.y = Math.min(
+      Math.max(this.vel.y, -this.speedMultiplier * state.frameRateMultiplier),
+      this.speedMultiplier * state.frameRateMultiplier
+    );
     this.pos.x += this.vel.x;
     this.pos.y += this.vel.y;
     this.acc.x = 0;
@@ -247,7 +348,12 @@ export class Creature {
       this.borderTimer = 0;
     }
 
-    if (this.cornerTimer >= 180 || this.immobileTimer >= 180 || this.borderTimer >= 600) { // 3 segundos para esquina/inmóvil, 10 segundos para borde
+    if (
+      this.cornerTimer >= 180 ||
+      this.immobileTimer >= 180 ||
+      this.borderTimer >= 600
+    ) {
+      // 3 segundos para esquina/inmóvil, 10 segundos para borde
       this.die();
     }
   }
@@ -258,7 +364,8 @@ export class Creature {
       (this.pos.x <= cornerThreshold && this.pos.y <= cornerThreshold) ||
       (this.pos.x >= 1900 - cornerThreshold && this.pos.y <= cornerThreshold) ||
       (this.pos.x <= cornerThreshold && this.pos.y >= 800 - cornerThreshold) ||
-      (this.pos.x >= 1900 - cornerThreshold && this.pos.y >= 800 - cornerThreshold)
+      (this.pos.x >= 1900 - cornerThreshold &&
+        this.pos.y >= 800 - cornerThreshold)
     );
   }
 
@@ -270,7 +377,12 @@ export class Creature {
   }
 
   handleBorders() {
-    if (this.pos.x < 0 || this.pos.x > 1900 || this.pos.y < 0 || this.pos.y > 800) {
+    if (
+      this.pos.x < 0 ||
+      this.pos.x > 1900 ||
+      this.pos.y < 0 ||
+      this.pos.y > 800
+    ) {
       this.die(); // Matar la criatura si toca el borde
     }
   }
@@ -285,19 +397,24 @@ export class Creature {
     if (this.energy <= 0) this.die();
   }
 
-  die() {
+  async die() {
+    let creatureScore = this.ageCounter * (this.foodEaten + this.preyEaten);
+    if (creatureScore > state.bestCreatureScore) {
+      state.bestCreatureScore = creatureScore;
+      state.bestCreatureBrainWeights = this.brain.model.getWeights().map(tensor => tensor.arraySync());
+      console.log(`New best creature weights saved, Score: ${state.bestCreatureScore}`);
+    }
+
     let index = state.creatures.indexOf(this);
     if (index > -1) {
       if (this.ageCounter > state.longestLivingDuration) {
         state.longestLivingDuration = this.ageCounter;
         state.longestLivingCreatures = [this];
-        console.log(`Nuevo récord de longevidad: ${this.ageCounter} ticks`);
       } else if (this.ageCounter === state.longestLivingDuration) {
         state.longestLivingCreatures.push(this);
       }
       state.creatures.splice(index, 1);
     }
-    // Asegúrate de liberar cualquier recurso asociado con la criatura aquí
     this.brain = null;
   }
 
@@ -331,10 +448,31 @@ export class Creature {
     const distanceToTop = this.pos.y;
     const distanceToBottom = 800 - this.pos.y;
 
-    await this.brain.train(
-      [[this.pos.x, this.pos.y, food.pos.x, food.pos.y, 0, 0, 0, 0, this.size, this.energy, this.touchingBorder, distanceToLeft, distanceToRight, distanceToTop, distanceToBottom]],
-      [[this.vel.x, this.vel.y]]
-    );
+    if (this.brain) {
+      // Asegúrate de que this.brain no sea null
+      await this.brain.train(
+        [
+          [
+            this.pos.x,
+            this.pos.y,
+            food.pos.x,
+            food.pos.y,
+            0,
+            0,
+            0,
+            0,
+            this.size,
+            this.energy,
+            this.touchingBorder,
+            distanceToLeft,
+            distanceToRight,
+            distanceToTop,
+            distanceToBottom,
+          ],
+        ],
+        [[this.vel.x, this.vel.y]]
+      );
+    }
   }
 
   eatCreature(other) {
@@ -361,12 +499,31 @@ export class Creature {
     const distanceToBottom = 800 - this.pos.y;
 
     await this.brain.train(
-      [[this.pos.x, this.pos.y, 0, 0, other.pos.x, other.pos.y, 0, 0, this.size, this.energy, this.touchingBorder, distanceToLeft, distanceToRight, distanceToTop, distanceToBottom]],
+      [
+        [
+          this.pos.x,
+          this.pos.y,
+          0,
+          0,
+          other.pos.x,
+          other.pos.y,
+          0,
+          0,
+          this.size,
+          this.energy,
+          this.touchingBorder,
+          distanceToLeft,
+          distanceToRight,
+          distanceToTop,
+          distanceToBottom,
+        ],
+      ],
       [[this.vel.x, this.vel.y]]
     );
   }
 
   age() {
+    this.ageCounter++; // Incrementa el contador de edad
     this.timeSinceLastMeal++;
     if (this.timeSinceLastMeal > 1000) {
       this.size -= 1;
@@ -388,23 +545,46 @@ export class Creature {
     for (let i = 0; i < numOffspring; i++) {
       let childColor = this.calculateChildColor(colorCounts);
       let childPos = this.generateChildPosition(distance);
-      let child = new Creature(childSize, childPos, childColor, 1.0, uuidv4(), this.brain.model); // Reutiliza el modelo
-      await child.brain.mutate(Math.random() * 0.14 + 0.01); // Aplicar mutación con una tasa aleatoria entre 1% y 15%
+      let child = new Creature(
+        childSize,
+        childPos,
+        childColor,
+        1.0,
+        uuidv4(),
+        this.brain
+      );
+      await child.initializeBrainWithWeights(this.brain.model.getWeights().map(tensor => tensor.arraySync()), this.brain.id); // Usar initializeBrainWithWeights
+
+      if (child.brain && child.brain.model) {
+        try {
+          await child.brain.mutate(Math.random() * 0.05 + 0.01); // Aplicar mutación de manera asincrónica
+        } catch (error) {
+          console.error("Error mutating child brain:", error);
+        }
+      } else {
+        console.error("Child brain is null or invalid");
+      }
       state.creatures.push(child);
     }
 
     this.size /= 3;
     if (this.size < this.minSize) this.size = this.minSize;
     this.reward += 3; // Recompensa por reproducirse
+    this.reproductions++; // Incrementar el contador de reproducciones
   }
 
   calculateNumOffspring() {
     switch (state.season) {
-      case "spring": return 5;
-      case "summer": return 4;
-      case "autumn": return Math.random() < 0.5 ? 4 : 3;
-      case "winter": return 3;
-      default: return 3;
+      case "spring":
+        return 5;
+      case "summer":
+        return 4;
+      case "autumn":
+        return Math.random() < 0.5 ? 4 : 3;
+      case "winter":
+        return 3;
+      default:
+        return 3;
     }
   }
 
@@ -425,7 +605,10 @@ export class Creature {
 
   generateChildPosition(distance) {
     let angle = Math.random() * Math.PI * 2;
-    return { x: this.pos.x + Math.cos(angle) * distance, y: this.pos.y + Math.sin(angle) * distance };
+    return {
+      x: this.pos.x + Math.cos(angle) * distance,
+      y: this.pos.y + Math.sin(angle) * distance,
+    };
   }
 
   dist(pos1, pos2) {
@@ -441,10 +624,14 @@ function getInitialColor() {
 }
 
 function getRandomColor() {
-  let newColor = `rgb(${Math.floor(Math.random() * 256)}, ${Math.floor(Math.random() * 256)}, ${Math.floor(Math.random() * 256)})`;
+  let newColor = `rgb(${Math.floor(Math.random() * 256)}, ${Math.floor(
+    Math.random() * 256
+  )}, ${Math.floor(Math.random() * 256)})`;
   return newColor;
 }
 
 function map(value, start1, stop1, start2, stop2) {
   return ((value - start1) / (stop1 - start1)) * (stop2 - stop2) + start2;
 }
+
+export { NeuralNetwork };

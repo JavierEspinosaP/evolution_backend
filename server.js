@@ -15,13 +15,13 @@ const server = app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
 });
 
-setInterval(() => {
-    const memoryUsage = process.memoryUsage();
-    console.log(`RSS: ${memoryUsage.rss / 1024 / 1024} MB`);
-    console.log(`Heap Total: ${memoryUsage.heapTotal / 1024 / 1024} MB`);
-    console.log(`Heap Used: ${memoryUsage.heapUsed / 1024 / 1024} MB`);
-    console.log(`External: ${memoryUsage.external / 1024 / 1024} MB`);
-}, 1000);
+// setInterval(() => {
+//     const memoryUsage = process.memoryUsage();
+//     console.log(`RSS: ${memoryUsage.rss / 1024 / 1024} MB`);
+//     console.log(`Heap Total: ${memoryUsage.heapTotal / 1024 / 1024} MB`);
+//     console.log(`Heap Used: ${memoryUsage.heapUsed / 1024 / 1024} MB`);
+//     console.log(`External: ${memoryUsage.external / 1024 / 1024} MB`);
+// }, 5000);
 
 const wss = new WebSocketServer({ server });
 
