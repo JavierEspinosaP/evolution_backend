@@ -1,6 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { Food, Creature, NeuralNetwork } from "./classes.js";
-import { Log } from "@tensorflow/tfjs";
+import { Food, Creature, DQNAgent } from "./classes.js";
 
 export const state = {
   currentMutationColor: null,
@@ -29,7 +28,7 @@ export const state = {
 
 // Inicializa las criaturas y la comida
 function initializeCreaturesAndFood() {
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 5; i++) {
     state.creatures.push(new Creature(11, undefined, undefined, 1.0, uuidv4())); // Aumentar tamaño inicial en un 10%
   }
   for (let i = 0; i < 50; i++) {
@@ -50,7 +49,6 @@ export async function updateState() {
 
   // Check if all creatures are dead
   if (state.creatures.length === 0) {
-    // console.log(`Generation ${state.generation} ended. Restarting with best creature.`);
     restartSimulationWithBestCreature();
   }
 }
@@ -110,47 +108,32 @@ function updateAndDisplayFood() {
 }
 
 function updateAndDisplayCreatures() {
-    let colorCounts = countColors(state.creatures);
-  
-    for (let i = state.creatures.length - 1; i >= 0; i--) {
-      let c = state.creatures[i];
-      c.act(state.food, state.creatures);
-      c.updateVelocityAndPosition();
-      c.handleBorders();
-      c.reduceEnergy();
-      c.eat(state.food);
-      c.age();
-      c.checkMitosis(colorCounts);
-  
-      if (c.brain && c.brain.model) { // Verificar que c.brain no sea null
-        let creatureScore = c.ageCounter * (c.foodEaten + c.preyEaten);
-        
-        if (creatureScore > state.bestCreatureScore) {
-            state.bestCreatureScore = creatureScore;
-            state.bestCreatureBrainWeights = c.brain.model.getWeights().map(tensor => tensor.arraySync());
-          }
-          
-          // Actualizar los mejores pesos históricos si es necesario
-          if (creatureScore > state.historicalBestCreatureScore) {
-            state.historicalBestCreatureScore = creatureScore;
-            state.historicalBestCreatureBrainWeights = c.brain.model.getWeights().map(tensor => tensor.arraySync());
-          }
-      }
-  
-      if (c.size <= c.minSize) {
-        state.creatures.splice(i, 1); // Eliminar criaturas muertas
-        continue;
-      }
-  
-      for (let j = state.creatures.length - 1; j >= 0; j--) {
-        if (i !== j && c.eatCreature(state.creatures[j])) {
-          state.creatures.splice(j, 1);
-          break;
-        }
+  let colorCounts = countColors(state.creatures);
+
+  for (let i = state.creatures.length - 1; i >= 0; i--) {
+    let c = state.creatures[i];
+    const stateArray = c.getState();
+    c.updateState(stateArray);
+    c.updateVelocityAndPosition();
+    c.handleBorders();
+    c.reduceEnergy();
+    c.eat(state.food);
+    c.age();
+    c.checkMitosis(colorCounts);
+
+    if (c.size <= c.minSize) {
+      state.creatures.splice(i, 1); // Eliminar criaturas muertas
+      continue;
+    }
+
+    for (let j = state.creatures.length - 1; j >= 0; j--) {
+      if (i !== j && c.eatCreature(state.creatures[j])) {
+        state.creatures.splice(j, 1);
+        break;
       }
     }
   }
-  
+}
 
 function countColors(creatures) {
   let colorCounts = {};
@@ -194,48 +177,47 @@ export function prepareStateForClient() {
     })),
   };
 
-  // Usar JSON.stringify en lugar de Flatted.stringify
   return JSON.stringify(cleanState);
 }
 
 async function restartSimulationWithBestCreature() {
-    state.generation++;
-    state.creatures = [];
-    state.food = [];
-    state.timeCounter = 0;
-  
-    const bestCreatureWeights = state.historicalBestCreatureBrainWeights; // Usar los pesos históricos
-    console.log('MEJOR PUNTUACION HISTÓRICA: ', state.historicalBestCreatureScore);
-     state.historicalBestCreatureBrainWeights
-    console.log(`Generation ${state.generation} ended. Total days: ${state.totalDays}. Best creature score: ${state.bestCreatureScore}. Historical best score: ${state.historicalBestCreatureScore}.`);
-  
-    state.bestCreatureScore = 0;
-  
-    if (bestCreatureWeights) {
-      const brainId = uuidv4();
-      for (let i = 0; i < 80; i++) {
-        let newCreature = new Creature(11, undefined, undefined, 1.0, uuidv4());
-        await newCreature.initializeBrainWithWeights(bestCreatureWeights, brainId); // Inicializa con pesos
-        try {
-          await newCreature.brain.mutate(Math.random() * 0.05 + 0.01);
-        } catch (error) {
-          console.error("Error mutating creature brain:", error);
-        }
-        state.creatures.push(newCreature);
+  state.generation++;
+  state.creatures = [];
+  state.food = [];
+  state.timeCounter = 0;
+
+  const bestCreatureWeights = state.historicalBestCreatureBrainWeights; // Usar los pesos históricos
+  console.log('MEJOR PUNTUACION HISTÓRICA: ', state.historicalBestCreatureScore);
+  state.historicalBestCreatureBrainWeights
+  console.log(`Generation ${state.generation} ended. Total days: ${state.totalDays}. Best creature score: ${state.bestCreatureScore}. Historical best score: ${state.historicalBestCreatureScore}.`);
+
+  state.bestCreatureScore = 0;
+
+  if (bestCreatureWeights) {
+    const brainId = uuidv4();
+    for (let i = 0; i < 20; i++) {
+      let newCreature = new Creature(11, undefined, undefined, 1.0, uuidv4());
+      await newCreature.agent.model.setWeights(bestCreatureWeights); // Inicializa con pesos
+      try {
+        await newCreature.agent.model.mutate(Math.random() * 0.05 + 0.01);
+      } catch (error) {
+        console.error("Error mutating creature brain:", error);
       }
-      for (let i = 0; i < 20; i++) {
-        let newCreature = new Creature(11, undefined, undefined, 1.0, uuidv4());
-        await newCreature.initializeBrainWithWeights(bestCreatureWeights, brainId); // Inicializa con pesos
-        try {
-          await newCreature.brain.mutate(Math.random() * 0.15 + 0.1);
-        } catch (error) {
-          console.error("Error mutating creature brain:", error);
-        }
-        state.creatures.push(newCreature);
-      }
-    } else {
-      initializeCreaturesAndFood();
+      state.creatures.push(newCreature);
     }
+    for (let i = 0; i < 20; i++) {
+      let newCreature = new Creature(11, undefined, undefined, 1.0, uuidv4());
+      await newCreature.agent.model.setWeights(bestCreatureWeights); // Inicializa con pesos
+      try {
+        await newCreature.agent.model.mutate(Math.random() * 0.15 + 0.1);
+      } catch (error) {
+        console.error("Error mutating creature brain:", error);
+      }
+      state.creatures.push(newCreature);
+    }
+  } else {
+    initializeCreaturesAndFood();
   }
-  
-  
+}
+
+setInterval(updateState, 1000 / 60); // Aproximadamente 60 FPS
