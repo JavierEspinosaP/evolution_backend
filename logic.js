@@ -1,7 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { Food, Creature } from './classes.js';
 
-
 export const state = {
     currentMutationColor: null,
     mutationCount: 0,
@@ -19,12 +18,14 @@ export const state = {
     seasonCounter: 0,
     seasonDuration: 3600, // 1 minuto en frames (60 FPS)
     yearDuration: 3600 * 4, // 4 estaciones
-    timeCounter: 0 // Nuevo contador de tiempo
+    timeCounter: 0, // Nuevo contador de tiempo
+    bestCreatureBrain: null, // Red neuronal de la mejor criatura
+    bestCreatureScore: 0 // Puntaje de la mejor criatura
 };
 
 // Inicializa las criaturas y la comida
 function initializeCreaturesAndFood() {
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 60; i++) {
         state.creatures.push(new Creature(11, undefined, undefined, 1.0, uuidv4())); // Aumentar tamaño inicial en un 10%
     }
     for (let i = 0; i < 50; i++) {
@@ -42,6 +43,11 @@ export function updateState() {
     updateTotalDays();
     updateAndDisplayFood();
     updateAndDisplayCreatures();
+    
+    // Check if all creatures are dead
+    if (state.creatures.length === 0) {
+        restartSimulationWithBestCreature();
+    }
 }
 
 function handleFoodRespawn() {
@@ -105,9 +111,17 @@ function updateAndDisplayCreatures() {
         let c = state.creatures[i];
         c.act(state.food, state.creatures);
         c.updateVelocityAndPosition();
+        c.handleBorders();
+        c.reduceEnergy();
         c.eat(state.food);
         c.age();
         c.checkMitosis(colorCounts);
+
+        // Track best creature
+        if (c.energy > state.bestCreatureScore) {
+            state.bestCreatureScore = c.energy;
+            state.bestCreatureBrain = c.brain.model.getWeights();
+        }
 
         if (c.size <= c.minSize) {
             state.creatures.splice(i, 1); // Eliminar criaturas muertas
@@ -168,3 +182,22 @@ export function prepareStateForClient() {
     // Usar JSON.stringify en lugar de Flatted.stringify
     return JSON.stringify(cleanState);
 }
+
+function restartSimulationWithBestCreature() {
+    state.creatures = [];
+    state.food = [];
+    state.timeCounter = 0;
+    state.bestCreatureScore = 0;
+
+    if (state.bestCreatureBrain) {
+        for (let i = 0; i < 60; i++) {
+            let newCreature = new Creature(11, undefined, undefined, 1.0, uuidv4());
+            newCreature.brain.model.setWeights(state.bestCreatureBrain);
+            newCreature.brain.mutate(Math.random() * 0.14 + 0.01); // Aplicar mutación con una tasa aleatoria entre 1% y 15%
+            state.creatures.push(newCreature);
+        }
+    } else {
+        initializeCreaturesAndFood();
+    }
+}
+
