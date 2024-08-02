@@ -3,9 +3,9 @@ import { state } from './logic.js';
 import * as tf from '@tensorflow/tfjs';
 
 class NeuralNetwork {
-  constructor(inputSize, outputSize, model = null) {
-    if (model) {
-      this.model = model;
+  constructor(inputSize, outputSize, existingModel = null) {
+    if (existingModel) {
+      this.model = existingModel;
     } else {
       this.model = tf.sequential();
       this.model.add(tf.layers.dense({ units: 32, inputShape: [inputSize], activation: 'relu', dtype: 'float32' }));
@@ -57,7 +57,7 @@ class NeuralNetwork {
       }
       newWeights.push(tf.tensor(newValues, shape, 'float32'));
     }
-    const child = new NeuralNetwork(weightsA[0].shape[0], weightsA[weightsA.length - 1].shape[0]);
+    const child = new NeuralNetwork(weightsA[0].shape[0], weightsA[weightsA.length - 1].shape[0], this.model);
     child.model.setWeights(newWeights);
     return child;
   }
@@ -117,7 +117,7 @@ export class Food {
 }
 
 export class Creature {
-  constructor(size = 11, pos = { x: Math.random() * 1900, y: Math.random() * 800 }, color = getInitialColor(), speedMultiplier = 1.0, id = uuidv4(), model = null) {
+  constructor(size = 11, pos = { x: Math.random() * 1900, y: Math.random() * 800 }, color = getInitialColor(), speedMultiplier = 1.0, id = uuidv4(), existingModel = null) {
     this.id = id;
     this.pos = pos;
     this.vel = { x: 0, y: 0 };
@@ -136,7 +136,7 @@ export class Creature {
     this.reproduced = false;
     this.ageCounter = 0;
     this.borderRepulsionAccum = { x: 0, y: 0 };
-    this.brain = model ? new NeuralNetwork(null, null, model) : new NeuralNetwork(15, 2); // Reutiliza el modelo si se proporciona
+    this.brain = new NeuralNetwork(15, 2, existingModel); // Reutiliza el modelo si se proporciona
     this.reward = 0;
     this.touchingBorder = 0; // Nuevo input booleano
     this.cornerTimer = 0; // Tiempo en la esquina
@@ -388,7 +388,7 @@ export class Creature {
     for (let i = 0; i < numOffspring; i++) {
       let childColor = this.calculateChildColor(colorCounts);
       let childPos = this.generateChildPosition(distance);
-      let child = new Creature(childSize, childPos, childColor, 1.0, uuidv4(), this.brain.model);
+      let child = new Creature(childSize, childPos, childColor, 1.0, uuidv4(), this.brain.model); // Reutiliza el modelo
       await child.brain.mutate(Math.random() * 0.14 + 0.01); // Aplicar mutación con una tasa aleatoria entre 1% y 15%
       state.creatures.push(child);
     }
