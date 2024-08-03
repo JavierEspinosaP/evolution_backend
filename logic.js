@@ -29,7 +29,7 @@ export const state = {
 
 // Inicializa las criaturas y la comida
 function initializeCreaturesAndFood() {
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 50; i++) {
     state.creatures.push(new Creature(11, undefined, undefined, 1.0, uuidv4())); // Aumentar tamaño inicial en un 10%
   }
   for (let i = 0; i < 50; i++) {
@@ -213,7 +213,7 @@ async function restartSimulationWithBestCreature() {
   
     if (bestCreatureWeights) {
       const brainId = uuidv4();
-      for (let i = 0; i < 80; i++) {
+      for (let i = 0; i < 40; i++) {
         let newCreature = new Creature(11, undefined, undefined, 1.0, uuidv4());
         await newCreature.initializeBrainWithWeights(bestCreatureWeights, brainId); // Inicializa con pesos
         try {
@@ -223,7 +223,7 @@ async function restartSimulationWithBestCreature() {
         }
         state.creatures.push(newCreature);
       }
-      for (let i = 0; i < 20; i++) {
+      for (let i = 0; i < 10; i++) {
         let newCreature = new Creature(11, undefined, undefined, 1.0, uuidv4());
         await newCreature.initializeBrainWithWeights(bestCreatureWeights, brainId); // Inicializa con pesos
         try {
