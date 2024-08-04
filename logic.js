@@ -1,236 +1,104 @@
 import { v4 as uuidv4 } from "uuid";
-import { Food, Creature, NeuralNetwork } from "./classes.js";
+import { Food, Creature } from "./classes.js";
 import * as tf from "@tensorflow/tfjs";
 
-export const state = {
-  currentMutationColor: null,
+const state = {
+  mutationColor: null,
   mutationCount: 0,
-  frameRateMultiplier: 1.5,
+  frameRate: 1.5,
   season: "spring",
   food: [],
   creatures: [],
-  colorTraits: {},
-  longestLivingCreatures: [],
-  longestLivingDuration: 0,
-  creatureIDCounter: 0,
+  bestBrainWeights: null,
+  bestScore: 0,
+  historicalBestScore: 0,
   totalDays: 0,
-  foodRespawnTime: 50,
+  timeCounter: 0,
   foodRespawnCounter: 0,
   seasonCounter: 0,
-  seasonDuration: 3600,
-  yearDuration: 3600 * 4,
-  timeCounter: 0,
-  bestCreatureBrainWeights: null,
-  bestCreatureScore: 0,
   generation: 1,
-  historicalBestCreatureBrainWeights: null,
-  historicalBestCreatureScore: 0,
-  experienceBuffer: [],
-  trainingIndex: 0,
 };
 
-function initializeCreaturesAndFood() {
-  for (let i = 0; i < 20; i++) {
-    state.creatures.push(new Creature(11, undefined, undefined, 1.0, uuidv4()));
-  }
-  for (let i = 0; i < 50; i++) {
-    state.food.push(new Food());
-  }
+const seasons = ["spring", "summer", "autumn", "winter"];
+const foodRespawnTimes = { spring: 10, summer: 50, autumn: 100, winter: 200 };
+
+function initializeEntities() {
+  for (let i = 0; i < 20; i++) state.creatures.push(new Creature());
+  for (let i = 0; i < 50; i++) state.food.push(new Food());
 }
 
-initializeCreaturesAndFood();
-
-export async function updateState() {
+function updateState() {
   state.timeCounter++;
-  handleFoodRespawn();
-  handleSeasonChange();
-  updateTotalDays();
-  updateAndDisplayFood();
-  updateAndDisplayCreatures();
-
-  if (state.creatures.length === 0) {
-    restartSimulationWithBestCreature();
-  }
-}
-
-function handleFoodRespawn() {
-  if (++state.foodRespawnCounter >= state.foodRespawnTime) {
+  if (++state.foodRespawnCounter >= foodRespawnTimes[state.season]) {
     state.food.push(new Food());
     state.foodRespawnCounter = 0;
   }
-}
-
-function handleSeasonChange() {
-  if (++state.seasonCounter >= state.seasonDuration) {
+  if (++state.seasonCounter >= 3600) {
     state.seasonCounter = 0;
-    changeSeason();
+    state.season = seasons[(seasons.indexOf(state.season) + 1) % seasons.length];
+  }
+  state.totalDays = Math.floor(state.timeCounter / 14400 * 365);
+  updateEntities();
+  if (state.creatures.length === 0) restartSimulation();
+}
+
+function updateEntities() {
+  updateAndDisplay(state.food);
+  updateAndDisplay(state.creatures, (c, i) => {
+    if (c.size <= c.minSize || c.handleCollisions()) state.creatures.splice(i, 1);
+    else if (c.getScore() > state.bestScore) {
+      state.bestScore = c.getScore();
+      state.bestBrainWeights = c.brain.model.getWeights().map(t => t.arraySync());
+    }
+    if (c.getScore() > state.historicalBestScore) state.historicalBestScore = c.getScore();
+  });
+}
+
+function updateAndDisplay(entities, callback) {
+  for (let i = entities.length - 1; i >= 0; i--) {
+    let e = entities[i];
+    e.move();
+    if (e.age()) entities.splice(i, 1);
+    if (callback) callback(e, i);
   }
 }
 
-function changeSeason() {
-  const seasons = ["spring", "summer", "autumn", "winter"];
-  state.season = seasons[(seasons.indexOf(state.season) + 1) % seasons.length];
-  adjustFoodRespawnTimeBySeason();
-}
-
-function adjustFoodRespawnTimeBySeason() {
-  switch (state.season) {
-    case "spring":
-      state.foodRespawnTime = 10;
-      break;
-    case "summer":
-      state.foodRespawnTime = 50;
-      break;
-    case "autumn":
-      state.foodRespawnTime = 100;
-      break;
-    case "winter":
-      state.foodRespawnTime = 200;
-      break;
-  }
-}
-
-function updateTotalDays() {
-  state.totalDays = Math.floor(state.timeCounter / (state.yearDuration / 365));
-}
-
-function updateAndDisplayFood() {
-  for (let i = state.food.length - 1; i >= 0; i--) {
-    let f = state.food[i];
-    f.move();
-    if (f.age()) {
-      state.food.splice(i, 1);
-    }
-  }
-}
-
-function updateAndDisplayCreatures() {
-  let colorCounts = countColors(state.creatures);
-
-  for (let i = state.creatures.length - 1; i >= 0; i--) {
-    let c = state.creatures[i];
-    c.act(state.food, state.creatures);
-    c.updateVelocityAndPosition();
-    c.handleBorders();
-    c.reduceEnergy();
-    c.eat(state.food);
-    c.age();
-    c.checkMitosis(colorCounts);
-
-    if (c.brain && c.brain.model) {
-      let creatureScore = c.getScore();
-      if (creatureScore > state.bestCreatureScore) {
-        state.bestCreatureScore = creatureScore;
-        state.bestCreatureBrainWeights = c.brain.model.getWeights().map(tensor => tensor.arraySync());
-      }
-      if (creatureScore > state.historicalBestCreatureScore) {
-        state.historicalBestCreatureScore = creatureScore;
-        state.historicalBestCreatureBrainWeights = c.brain.model.getWeights().map(tensor => tensor.arraySync());
-      }
-    }
-
-    if (c.size <= c.minSize) {
-      state.creatures.splice(i, 1);
-      continue;
-    }
-
-    for (let j = state.creatures.length - 1; j >= 0; j--) {
-      if (i !== j && c.eatCreature(state.creatures[j])) {
-        state.creatures.splice(j, 1);
-        break;
-      }
-    }
-  }
-}
-
-function countColors(creatures) {
-  let colorCounts = {};
-  for (let creature of creatures) {
-    if (!colorCounts[creature.color]) {
-      colorCounts[creature.color] = 0;
-    }
-    colorCounts[creature.color]++;
-  }
-  return colorCounts;
-}
-
-export function updateMutationColorAndCount(newColor) {
-  state.currentMutationColor = newColor;
-  state.mutationCount = 0;
-}
-
-export function prepareStateForClient() {
-  const cleanState = {
-    ...state,
-    creatures: state.creatures.map(creature => ({
-      id: creature.id,
-      pos: creature.pos,
-      size: creature.size,
-      color: creature.color,
-      energy: creature.energy,
-      foodEaten: creature.foodEaten,
-      preyEaten: creature.preyEaten,
-      ageCounter: creature.ageCounter,
-    })),
-    food: state.food.map(foodItem => ({
-      id: foodItem.id,
-      pos: foodItem.pos,
-      type: foodItem.type,
-    })),
-  };
-
-  return JSON.stringify(cleanState);
-}
-
-async function restartSimulationWithBestCreature() {
+function restartSimulation() {
   state.generation++;
   state.creatures = [];
   state.food = [];
   state.timeCounter = 0;
-
-  const bestCreatureWeights = state.historicalBestCreatureBrainWeights;
-  console.log(`Generation ${state.generation} ended. Total days: ${state.totalDays}. Best creature score: ${state.bestCreatureScore}. Historical best score: ${state.historicalBestCreatureScore}.`);
-
-  state.bestCreatureScore = 0;
-
-  if (bestCreatureWeights) {
-    const brainId = uuidv4();
+  const weights = state.bestBrainWeights;
+  if (weights) {
     for (let i = 0; i < 20; i++) {
-      let newCreature = new Creature(11, undefined, undefined, 1.0, uuidv4());
-      await newCreature.initializeBrainWithWeights(bestCreatureWeights, brainId);
-      try {
-        await newCreature.brain.mutate(Math.random() * 0.1 + 0.05);
-      } catch (error) {
-        console.error("Error mutating creature brain:", error);
-      }
-      state.creatures.push(newCreature);
+      let creature = new Creature();
+      creature.initializeBrain(weights);
+      state.creatures.push(creature);
     }
-  } else {
-    console.log('SISTEMA REINICIADO DESDE 0');
-    initializeCreaturesAndFood();
-  }
+  } else initializeEntities();
 }
 
-Creature.prototype.getScore = function() {
-  return this.ageCounter * (this.foodEaten + this.preyEaten * 2) * (1 + this.energy / 100);
-};
-
-export async function handleSteppedTraining() {
-  const experiences = state.experienceBuffer;
-  if (experiences.length === 0) return;
-
-  const inputs = experiences.map(exp => exp.inputs);
-  const targets = experiences.map(exp => [exp.reward + exp.newState[0], exp.reward + exp.newState[1]]);
-
-  if (state.creatures.length === 0) return;
-
-  const creatureIndex = state.trainingIndex % state.creatures.length;
-  const creature = state.creatures[creatureIndex];
-
-  if (creature.brain && creature.brain.model) {
-    await creature.brain.train(inputs, targets);
-  }
-
-  state.trainingIndex++;
-  state.experienceBuffer = [];
+function prepareStateForClient() {
+  return JSON.stringify({
+    ...state,
+    creatures: state.creatures.map(c => ({
+      id: c.id,
+      pos: c.pos,
+      size: c.size,
+      color: c.color,
+      energy: c.energy,
+      foodEaten: c.foodEaten,
+      preyEaten: c.preyEaten,
+      ageCounter: c.ageCounter,
+    })),
+    food: state.food.map(f => ({
+      id: f.id,
+      pos: f.pos,
+      type: f.type,
+    })),
+  });
 }
+
+initializeEntities();
+
+export { state, updateState, prepareStateForClient };
