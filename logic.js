@@ -123,7 +123,7 @@ function updateAndDisplayCreatures() {
       c.checkMitosis(colorCounts);
   
       if (c.brain && c.brain.model) { // Verificar que c.brain no sea null
-        let creatureScore = c.ageCounter * (c.foodEaten + c.preyEaten);
+        let creatureScore = c.ageCounter * (c.foodEaten + 2 * c.preyEaten) * (1 + c.energy / 100);
         
         if (creatureScore > state.bestCreatureScore) {
             state.bestCreatureScore = creatureScore;
@@ -205,7 +205,6 @@ async function restartSimulationWithBestCreature() {
     state.timeCounter = 0;
   
     const bestCreatureWeights = state.historicalBestCreatureBrainWeights; // Usar los pesos históricos
-    console.log('MEJOR PUNTUACION HISTÓRICA: ', state.historicalBestCreatureScore);
      state.historicalBestCreatureBrainWeights
     console.log(`Generation ${state.generation} ended. Total days: ${state.totalDays}. Best creature score: ${state.bestCreatureScore}. Historical best score: ${state.historicalBestCreatureScore}.`);
   
@@ -234,6 +233,8 @@ async function restartSimulationWithBestCreature() {
         state.creatures.push(newCreature);
       }
     } else {
+      console.log('SISTEMA REINICIADO DESDE 0');
+      
       initializeCreaturesAndFood();
     }
   }
