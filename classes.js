@@ -2,6 +2,9 @@ import { v4 as uuidv4 } from "uuid";
 import { state } from "./logic.js";
 import * as tf from "@tensorflow/tfjs";
 
+const MAX_SIZE = 37.5;
+const BATCH_SIZE = 32; // Tamaño del lote para el entrenamiento continuo
+
 class NeuralNetwork {
   constructor(inputSize, outputSize, existingModel) {
     this.model = null;
@@ -12,25 +15,20 @@ class NeuralNetwork {
   }
 
   async initialize(inputSize, outputSize, existingModel = null) {
-    // console.log("Initializing new model...");
     this.model = tf.sequential();
     this.model.add(
       tf.layers.dense({
-        units: 64, // Aumentar el número de neuronas
+        units: 32,
         inputShape: [inputSize],
         activation: "relu",
         dtype: "float32",
       })
     );
     this.model.add(
-      tf.layers.dense({ units: 32, activation: "relu", dtype: "float32" }) // Agregar más capas y neuronas
+      tf.layers.dense({ units: 16, activation: "relu", dtype: "float32" })
     );
     this.model.add(
-      tf.layers.dense({
-        units: 16, // Capa adicional
-        activation: "relu",
-        dtype: "float32",
-      })
+      tf.layers.dense({ units: 8, activation: "relu", dtype: "float32" })
     );
     this.model.add(
       tf.layers.dense({
@@ -39,33 +37,30 @@ class NeuralNetwork {
         dtype: "float32",
       })
     );
-    this.model.compile({ optimizer: "adam", loss: "meanSquaredError" }); // Usar 'adam' como optimizador
+    this.model.compile({ optimizer: "adam", loss: "meanSquaredError" });
 
     if (existingModel && existingModel.layers && existingModel.layers.length > 0) {
-      // console.log("Applying existing model weights...");
       const weightTensors = existingModel.getWeights();
       this.model.setWeights(weightTensors);
     }
     this.id = uuidv4();
-    // console.log(`Initialized with ID: ${this.id}`);
   }
 
   async initializeWithWeights(inputSize, outputSize, weights = null) {
-    // console.log("Initializing model with specific weights...");
     this.model = tf.sequential();
     this.model.add(
       tf.layers.dense({
-        units: 64,
+        units: 32,
         inputShape: [inputSize],
         activation: "relu",
         dtype: "float32",
       })
     );
     this.model.add(
-      tf.layers.dense({ units: 32, activation: "relu", dtype: "float32" })
+      tf.layers.dense({ units: 16, activation: "relu", dtype: "float32" })
     );
     this.model.add(
-      tf.layers.dense({ units: 16, activation: "relu", dtype: "float32" })
+      tf.layers.dense({ units: 8, activation: "relu", dtype: "float32" })
     );
     this.model.add(
       tf.layers.dense({
@@ -82,7 +77,6 @@ class NeuralNetwork {
     }
 
     this.id = uuidv4();
-    // console.log(`Initialized with weights, ID: ${this.id}`);
   }
 
   async mutate(rate) {
@@ -117,16 +111,10 @@ class NeuralNetwork {
       return;
     }
     this.isTraining = true; // Establecer el estado de entrenamiento en verdadero
-    const inputTensor = tf.tensor2d(
-      inputs,
-      [inputs.length, inputs[0].length],
-      "float32"
-    );
-    const targetTensor = tf.tensor2d(
-      targets,
-      [targets.length, targets[0].length],
-      "float32"
-    );
+
+    const inputTensor = tf.tensor2d(inputs, [inputs.length, inputs[0].length], "float32");
+    const targetTensor = tf.tensor2d(targets, [targets.length, targets[0].length], "float32");
+
     try {
       await this.model.fit(inputTensor, targetTensor, { epochs: 1 });
     } catch (error) {
@@ -138,6 +126,24 @@ class NeuralNetwork {
     }
   }
 
+  calculateBorderProximityPenalty(input) {
+    const borderThreshold = 100; // Distancia a la que empieza la penalización
+    const maxPenalty = 5.0; // Penalización máxima
+
+    const distanceToLeft = input[11];
+    const distanceToRight = input[12];
+    const distanceToTop = input[13];
+    const distanceToBottom = input[14];
+
+    let penalty = 0;
+    if (distanceToLeft < borderThreshold) penalty += maxPenalty * (borderThreshold - distanceToLeft) / borderThreshold;
+    if (distanceToRight < borderThreshold) penalty += maxPenalty * (borderThreshold - distanceToRight) / borderThreshold;
+    if (distanceToTop < borderThreshold) penalty += maxPenalty * (borderThreshold - distanceToTop) / borderThreshold;
+    if (distanceToBottom < borderThreshold) penalty += maxPenalty * (borderThreshold - distanceToBottom) / borderThreshold;
+
+    return penalty;
+  }
+  
   predict(inputs) {
     return tf.tidy(() => {
       const inputTensor = tf.tensor2d([inputs], [1, inputs.length], "float32");
@@ -149,8 +155,6 @@ class NeuralNetwork {
     });
   }
 }
-
-
 
 export class Food {
   constructor() {
@@ -186,14 +190,7 @@ export class Food {
 }
 
 export class Creature {
-  constructor(
-    size = 11,
-    pos = { x: Math.random() * 1900, y: Math.random() * 800 },
-    color = getInitialColor(),
-    speedMultiplier = 1.0,
-    id = uuidv4(),
-    existingModel = null
-  ) {
+  constructor(size = 11, pos = { x: Math.random() * 1900, y: Math.random() * 800 }, color = getInitialColor(), speedMultiplier = 1.0, id = uuidv4(), existingModel = null) {
     this.id = id;
     this.pos = pos;
     this.vel = { x: 0, y: 0 };
@@ -211,17 +208,18 @@ export class Creature {
     this.preyEaten = 0;
     this.reproduced = false;
     this.ageCounter = 0;
-    this.reproductions = 0; // Nuevo atributo para contar reproducciones
+    this.reproductions = 0;
     this.borderRepulsionAccum = { x: 0, y: 0 };
-    this.brain = new NeuralNetwork(15, 2, existingModel); // Reutiliza el modelo si se proporciona
+    this.brain = new NeuralNetwork(15, 2, existingModel);
     if (!this.brain) {
       console.error("Error initializing brain for creature:", this.id);
     }
     this.reward = 0;
-    this.touchingBorder = 0; // Nuevo input booleano
-    this.cornerTimer = 0; // Tiempo en la esquina
-    this.immobileTimer = 0; // Tiempo inmóvil
-    this.borderTimer = 0; // Tiempo tocando el borde
+    this.touchingBorder = 0;
+    this.borderTimer = 0;
+    this.experienceBuffer = [];
+    this.lastFoodDistance = null;
+    this.lastPreyDistance = null;
   }
 
   async initializeBrainWithWeights(weights, brainId) {
@@ -245,27 +243,139 @@ export class Creature {
     const distanceToTop = this.pos.y;
     const distanceToBottom = 800 - this.pos.y;
 
-    if (closestFood) {
-      const inputs = [
-        this.pos.x,
-        this.pos.y,
-        closestFood.pos.x,
-        closestFood.pos.y,
-        closestPrey ? closestPrey.pos.x : 0,
-        closestPrey ? closestPrey.pos.y : 0,
-        closestPredator ? closestPredator.pos.x : 0,
-        closestPredator ? closestPredator.pos.y : 0,
-        this.size,
-        this.energy,
-        this.touchingBorder,
-        distanceToLeft,
-        distanceToRight,
-        distanceToTop,
-        distanceToBottom,
-      ];
-      const [dx, dy] = this.brain.predict(inputs);
-      this.applyForce({ x: dx, y: dy });
+    const inputs = [
+      this.pos.x / 1900,
+      this.pos.y / 800,
+      closestFood ? closestFood.pos.x / 1900 : 0,
+      closestFood ? closestFood.pos.y / 800 : 0,
+      closestPrey ? closestPrey.pos.x / 1900 : 0,
+      closestPrey ? closestPrey.pos.y / 800 : 0,
+      closestPredator ? closestPredator.pos.x / 1900 : 0,
+      closestPredator ? closestPredator.pos.y / 800 : 0,
+      this.size / MAX_SIZE,
+      this.energy / 100,
+      this.touchingBorder,
+      distanceToLeft / 1900,
+      distanceToRight / 1900,
+      distanceToTop / 800,
+      distanceToBottom / 800,
+    ];
+    const [dx, dy] = this.brain.predict(inputs);
+    this.applyForce({ x: dx, y: dy });
+
+    // Recolectar experiencia continuamente
+    const reward = this.calculateReward(closestFood, closestPrey);
+    const newState = this.getState();
+
+    // Entrenar la red neuronal solo si se cumplen las condiciones especificadas
+    if (closestFood || closestPrey || closestPredator || this.isNearBorder()) {
+      this.experienceBuffer.push({ inputs, action: [dx, dy], reward, newState });
+
+      if (this.experienceBuffer.length >= BATCH_SIZE) {
+        this.trainNetwork();
+        this.experienceBuffer = [];
+      }
     }
+
+    // Actualizar las distancias anteriores
+    if (closestFood) {
+      this.lastFoodDistance = this.dist(this.pos, closestFood.pos);
+    }
+    if (closestPrey) {
+      this.lastPreyDistance = this.dist(this.pos, closestPrey.pos);
+    }
+  }
+
+  isNearBorder() {
+    const distanceToLeft = this.pos.x;
+    const distanceToRight = 1900 - this.pos.x;
+    const distanceToTop = this.pos.y;
+    const distanceToBottom = 800 - this.pos.y;
+    const borderThreshold = 50; // Umbral para considerar que está cerca del borde
+    return (
+      distanceToLeft < borderThreshold ||
+      distanceToRight < borderThreshold ||
+      distanceToTop < borderThreshold ||
+      distanceToBottom < borderThreshold
+    );
+  }
+
+  calculateReward(closestFood, closestPrey) {
+    let reward = 0;
+    reward += this.foodEaten * 1;
+    reward += this.preyEaten * 2;
+    reward -= this.calculateBorderProximityPenalty() * 10;
+
+    // Recompensa o castigo basado en la distancia a la comida
+    if (closestFood) {
+      const currentFoodDistance = this.dist(this.pos, closestFood.pos);
+      if (this.lastFoodDistance !== null) {
+        if (currentFoodDistance < this.lastFoodDistance) {
+          reward += 0.1; // Recompensa por acercarse a la comida
+        } else {
+          reward -= 0.1; // Castigo por alejarse de la comida
+        }
+      }
+      this.lastFoodDistance = currentFoodDistance;
+    }
+
+    // Recompensa o castigo basado en la distancia a la presa
+    if (closestPrey) {
+      const currentPreyDistance = this.dist(this.pos, closestPrey.pos);
+      if (this.lastPreyDistance !== null) {
+        if (currentPreyDistance < this.lastPreyDistance) {
+          reward += 0.2; // Recompensa por acercarse a la presa
+        } else {
+          reward -= 0.2; // Castigo por alejarse de la presa
+        }
+      }
+      this.lastPreyDistance = currentPreyDistance;
+    }
+
+    return reward;
+  }
+
+  getState() {
+    const closestFood = this.findClosest(state.food);
+    const closestPrey = this.findClosestPrey(state.creatures);
+    const closestPredator = this.findClosestPredator(state.creatures);
+    const distanceToLeft = this.pos.x;
+    const distanceToRight = 1900 - this.pos.x;
+    const distanceToTop = this.pos.y;
+    const distanceToBottom = 800 - this.pos.y;
+
+    return [
+      this.pos.x / 1900,
+      this.pos.y / 800,
+      closestFood ? closestFood.pos.x / 1900 : 0,
+      closestFood ? closestFood.pos.y / 800 : 0,
+      closestPrey ? closestPrey.pos.x / 1900 : 0,
+      closestPrey ? closestPrey.pos.y / 800 : 0,
+      closestPredator ? closestPredator.pos.x / 1900 : 0,
+      closestPredator ? closestPredator.pos.y / 800 : 0,
+      this.size / MAX_SIZE,
+      this.energy / 100,
+      this.touchingBorder,
+      distanceToLeft / 1900,
+      distanceToRight / 1900,
+      distanceToTop / 800,
+      distanceToBottom / 800,
+    ];
+  }
+
+  async trainNetwork() {
+    const batch = this.sampleExperiences(BATCH_SIZE);
+    const inputs = batch.map(exp => exp.inputs);
+    const targets = batch.map(exp => [exp.reward + this.brain.predict(exp.newState)[0], exp.reward + this.brain.predict(exp.newState)[1]]);
+    await this.brain.train(inputs, targets);
+  }
+
+  sampleExperiences(size) {
+    const sampled = [];
+    for (let i = 0; i < size; i++) {
+      sampled.push(this.experienceBuffer[Math.floor(Math.random() * this.experienceBuffer.length)]);
+    }
+    return sampled;
   }
 
   findClosest(food) {
@@ -312,17 +422,10 @@ export class Creature {
   }
 
   updateVelocityAndPosition() {
-    const previousPos = { ...this.pos };
     this.vel.x += this.acc.x;
     this.vel.y += this.acc.y;
-    this.vel.x = Math.min(
-      Math.max(this.vel.x, -this.speedMultiplier * state.frameRateMultiplier),
-      this.speedMultiplier * state.frameRateMultiplier
-    );
-    this.vel.y = Math.min(
-      Math.max(this.vel.y, -this.speedMultiplier * state.frameRateMultiplier),
-      this.speedMultiplier * state.frameRateMultiplier
-    );
+    this.vel.x = Math.min(Math.max(this.vel.x, -this.speedMultiplier * state.frameRateMultiplier), this.speedMultiplier * state.frameRateMultiplier);
+    this.vel.y = Math.min(Math.max(this.vel.y, -this.speedMultiplier * state.frameRateMultiplier), this.speedMultiplier * state.frameRateMultiplier);
     this.pos.x += this.vel.x;
     this.pos.y += this.vel.y;
     this.acc.x = 0;
@@ -330,67 +433,47 @@ export class Creature {
 
     this.handleBorders();
 
-    if (this.isInCorner()) {
-      this.cornerTimer++;
-    } else {
-      this.cornerTimer = 0;
-    }
-
-    if (this.isImmobile(previousPos)) {
-      this.immobileTimer++;
-    } else {
-      this.immobileTimer = 0;
-    }
-
     if (this.touchingBorder) {
       this.borderTimer++;
     } else {
       this.borderTimer = 0;
     }
 
-    if (
-      this.cornerTimer >= 180 ||
-      this.immobileTimer >= 180 ||
-      this.borderTimer >= 600
-    ) {
-      // 3 segundos para esquina/inmóvil, 10 segundos para borde
+    if (this.borderTimer >= 600) {
       this.die();
     }
   }
 
-  isInCorner() {
-    const cornerThreshold = 50;
-    return (
-      (this.pos.x <= cornerThreshold && this.pos.y <= cornerThreshold) ||
-      (this.pos.x >= 1900 - cornerThreshold && this.pos.y <= cornerThreshold) ||
-      (this.pos.x <= cornerThreshold && this.pos.y >= 800 - cornerThreshold) ||
-      (this.pos.x >= 1900 - cornerThreshold &&
-        this.pos.y >= 800 - cornerThreshold)
-    );
-  }
-
-  isImmobile(previousPos) {
-    const immobileThreshold = 1; // Threshold para considerar inmóvil
-    const dx = this.pos.x - previousPos.x;
-    const dy = this.pos.y - previousPos.y;
-    return Math.abs(dx) < immobileThreshold && Math.abs(dy) < immobileThreshold;
-  }
-
   handleBorders() {
-    if (
-      this.pos.x < 0 ||
-      this.pos.x > 1900 ||
-      this.pos.y < 0 ||
-      this.pos.y > 800
-    ) {
-      this.die(); // Matar la criatura si toca el borde
+    if (this.pos.x < 0 || this.pos.x > 1900 || this.pos.y < 0 || this.pos.y > 800) {
+      this.die();
     }
   }
 
   reduceEnergy() {
     let distance = Math.sqrt(this.vel.x * this.vel.x + this.vel.y * this.vel.y);
     this.energy -= distance * 0.08;
-    this.reward -= 0.01; // Penalización por moverse sin comer
+    this.reward -= 0.01;
+    const borderProximityPenalty = this.calculateBorderProximityPenalty();
+    this.reward -= borderProximityPenalty * 10;
+  }
+
+  calculateBorderProximityPenalty() {
+    const borderThreshold = 100;
+    const maxPenalty = 5.0;
+
+    const distanceToLeft = this.pos.x;
+    const distanceToRight = 1900 - this.pos.x;
+    const distanceToTop = this.pos.y;
+    const distanceToBottom = 800 - this.pos.y;
+
+    let penalty = 0;
+    if (distanceToLeft < borderThreshold) penalty += maxPenalty * (borderThreshold - distanceToLeft) / borderThreshold;
+    if (distanceToRight < borderThreshold) penalty += maxPenalty * (borderThreshold - distanceToRight) / borderThreshold;
+    if (distanceToTop < borderThreshold) penalty += maxPenalty * (borderThreshold - distanceToTop) / borderThreshold;
+    if (distanceToBottom < borderThreshold) penalty += maxPenalty * (borderThreshold - distanceToBottom) / borderThreshold;
+
+    return penalty;
   }
 
   checkEnergy() {
@@ -441,7 +524,7 @@ export class Creature {
     }
     this.timeSinceLastMeal = 0;
     this.foodEaten++;
-    this.reward += 1; // Recompensa por comer
+    this.reward += 1;
 
     const distanceToLeft = this.pos.x;
     const distanceToRight = 1900 - this.pos.x;
@@ -449,25 +532,24 @@ export class Creature {
     const distanceToBottom = 800 - this.pos.y;
 
     if (this.brain) {
-      // Asegúrate de que this.brain no sea null
       await this.brain.train(
         [
           [
-            this.pos.x,
-            this.pos.y,
-            food.pos.x,
-            food.pos.y,
+            this.pos.x / 1900,
+            this.pos.y / 800,
+            food.pos.x / 1900,
+            food.pos.y / 800,
             0,
             0,
             0,
             0,
-            this.size,
-            this.energy,
+            this.size / MAX_SIZE,
+            this.energy / 100,
             this.touchingBorder,
-            distanceToLeft,
-            distanceToRight,
-            distanceToTop,
-            distanceToBottom,
+            distanceToLeft / 1900,
+            distanceToRight / 1900,
+            distanceToTop / 800,
+            distanceToBottom / 800,
           ],
         ],
         [[this.vel.x, this.vel.y]]
@@ -491,7 +573,7 @@ export class Creature {
     this.timeSinceLastMeal = 0;
     this.energy += other.size * 50;
     this.preyEaten++;
-    this.reward += 2; // Recompensa por comer otra criatura
+    this.reward += 2;
 
     const distanceToLeft = this.pos.x;
     const distanceToRight = 1900 - this.pos.x;
@@ -501,21 +583,21 @@ export class Creature {
     await this.brain.train(
       [
         [
-          this.pos.x,
-          this.pos.y,
+          this.pos.x / 1900,
+          this.pos.y / 800,
+          other.pos.x / 1900,
+          other.pos.y / 800,
           0,
           0,
-          other.pos.x,
-          other.pos.y,
           0,
           0,
-          this.size,
-          this.energy,
+          this.size / MAX_SIZE,
+          this.energy / 100,
           this.touchingBorder,
-          distanceToLeft,
-          distanceToRight,
-          distanceToTop,
-          distanceToBottom,
+          distanceToLeft / 1900,
+          distanceToRight / 1900,
+          distanceToTop / 800,
+          distanceToBottom / 800,
         ],
       ],
       [[this.vel.x, this.vel.y]]
@@ -523,7 +605,7 @@ export class Creature {
   }
 
   age() {
-    this.ageCounter++; // Incrementa el contador de edad
+    this.ageCounter++;
     this.timeSinceLastMeal++;
     if (this.timeSinceLastMeal > 1000) {
       this.size -= 1;
@@ -545,19 +627,12 @@ export class Creature {
     for (let i = 0; i < numOffspring; i++) {
       let childColor = this.calculateChildColor(colorCounts);
       let childPos = this.generateChildPosition(distance);
-      let child = new Creature(
-        childSize,
-        childPos,
-        childColor,
-        1.0,
-        uuidv4(),
-        this.brain
-      );
-      await child.initializeBrainWithWeights(this.brain.model.getWeights().map(tensor => tensor.arraySync()), this.brain.id); // Usar initializeBrainWithWeights
+      let child = new Creature(childSize, childPos, childColor, 1.0, uuidv4(), this.brain);
+      await child.initializeBrainWithWeights(this.brain.model.getWeights().map(tensor => tensor.arraySync()), this.brain.id);
 
       if (child.brain && child.brain.model) {
         try {
-          await child.brain.mutate(Math.random() * 0.05 + 0.01); // Aplicar mutación de manera asincrónica
+          await child.brain.mutate(Math.random() * 0.05 + 0.01);
         } catch (error) {
           console.error("Error mutating child brain:", error);
         }
@@ -569,8 +644,8 @@ export class Creature {
 
     this.size /= 3;
     if (this.size < this.minSize) this.size = this.minSize;
-    this.reward += 3; // Recompensa por reproducirse
-    this.reproductions++; // Incrementar el contador de reproducciones
+    this.reward += 3;
+    this.reproductions++;
   }
 
   calculateNumOffspring() {
@@ -624,9 +699,7 @@ function getInitialColor() {
 }
 
 function getRandomColor() {
-  let newColor = `rgb(${Math.floor(Math.random() * 256)}, ${Math.floor(
-    Math.random() * 256
-  )}, ${Math.floor(Math.random() * 256)})`;
+  let newColor = `rgb(${Math.floor(Math.random() * 256)}, ${Math.floor(Math.random() * 256)}, ${Math.floor(Math.random() * 256)})`;
   return newColor;
 }
 
