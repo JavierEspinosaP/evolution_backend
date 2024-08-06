@@ -5,27 +5,63 @@ export const state = {
     currentMutationColor: null,
     mutationCount: 0,
     frameRateMultiplier: 1,
-    season: "spring",
     food: [],
     creatures: [],
-    colorTraits: {},
-    longestLivingCreatures: [],
     longestLivingDuration: 0,
-    creatureIDCounter: 0,
     totalDays: 0,
     foodRespawnTime: 50,
     foodRespawnCounter: 0,
-    seasonCounter: 0,
-    seasonDuration: 3600, // 1 minuto en frames (60 FPS)
-    yearDuration: 3600 * 4, // 4 estaciones
-    timeCounter: 0 // Nuevo contador de tiempo
+    timeCounter: 0, // Nuevo contador de tiempo
+    bestModelWeights: null, // Pesos del mejor modelo
+    topCreatures: [] // Lista de las mejores criaturas
 };
 
 // Inicializa las criaturas y la comida
-function initializeCreaturesAndFood() {
-    for (let i = 0; i < 5; i++) {
-        state.creatures.push(new Creature(11, undefined, undefined, 1.0, uuidv4())); // Aumentar tamaño inicial en un 10%
+function initializeCreaturesAndFood(weights = null) {
+    state.creatures = [];
+    let totalCreatures = 20;
+    let numBest = Math.ceil(0.5 * totalCreatures); // 50%
+    let numSecondBest = Math.ceil(0.3 * totalCreatures); // 30%
+    let numThirdBest = Math.ceil(0.15 * totalCreatures); // 15%
+    let numFourthBest = Math.ceil(0.05 * totalCreatures); // 5%
+
+    for (let i = 0; i < numBest; i++) {
+        let creature = new Creature(11, undefined, undefined, 1.0, uuidv4());
+        if (weights && weights.length > 0) {
+            creature.brain.initializeWithWeights(creature.brain.model.inputShape[1], creature.brain.model.outputShape[1], weights[0]);
+            creature.brain.mutate(0.01); // Aplicar una mutación del 1%
+        }
+        state.creatures.push(creature);
     }
+
+    for (let i = 0; i < numSecondBest; i++) {
+        let creature = new Creature(11, undefined, undefined, 1.0, uuidv4());
+        if (weights && weights.length > 1) {
+            creature.brain.initializeWithWeights(creature.brain.model.inputShape[1], creature.brain.model.outputShape[1], weights[1]);
+            creature.brain.mutate(0.01); // Aplicar una mutación del 1%
+        }
+        state.creatures.push(creature);
+    }
+
+    for (let i = 0; i < numThirdBest; i++) {
+        let creature = new Creature(11, undefined, undefined, 1.0, uuidv4());
+        if (weights && weights.length > 2) {
+            creature.brain.initializeWithWeights(creature.brain.model.inputShape[1], creature.brain.model.outputShape[1], weights[2]);
+            creature.brain.mutate(0.01); // Aplicar una mutación del 1%
+        }
+        state.creatures.push(creature);
+    }
+
+    for (let i = 0; i < numFourthBest; i++) {
+        let creature = new Creature(11, undefined, undefined, 1.0, uuidv4());
+        if (weights && weights.length > 3) {
+            creature.brain.initializeWithWeights(creature.brain.model.inputShape[1], creature.brain.model.outputShape[1], weights[3]);
+            creature.brain.mutate(0.01); // Aplicar una mutación del 1%
+        }
+        state.creatures.push(creature);
+    }
+
+    state.food = [];
     for (let i = 0; i < 50; i++) {
         state.food.push(new Food());
     }
@@ -37,10 +73,10 @@ initializeCreaturesAndFood();
 export function updateState() {
     state.timeCounter++; // Incrementa el contador de tiempo
     handleFoodRespawn();
-    handleSeasonChange();
     updateTotalDays();
     updateAndDisplayFood();
     updateAndDisplayCreatures();
+    checkAllCreaturesDead();
 }
 
 function handleFoodRespawn() {
@@ -51,40 +87,8 @@ function handleFoodRespawn() {
     }
 }
 
-function handleSeasonChange() {
-    state.seasonCounter++;
-    if (state.seasonCounter >= state.seasonDuration) {
-        state.seasonCounter = 0;
-        changeSeason();
-    }
-}
-
-function changeSeason() {
-    const seasons = ["spring", "summer", "autumn", "winter"];
-    let currentSeasonIndex = seasons.indexOf(state.season);
-    state.season = seasons[(currentSeasonIndex + 1) % seasons.length];
-    adjustFoodRespawnTimeBySeason();
-}
-
-function adjustFoodRespawnTimeBySeason() {
-    switch (state.season) {
-        case "spring":
-            state.foodRespawnTime = 10;
-            break;
-        case "summer":
-            state.foodRespawnTime = 50;
-            break;
-        case "autumn":
-            state.foodRespawnTime = 100;
-            break;
-        case "winter":
-            state.foodRespawnTime = 200;
-            break;
-    }
-}
-
 function updateTotalDays() {
-    state.totalDays = Math.floor(state.timeCounter / (state.yearDuration / 365));
+    state.totalDays = Math.floor(state.timeCounter / (3600 / 365)); // 1 año es 3600 segundos
 }
 
 function updateAndDisplayFood() {
@@ -108,16 +112,34 @@ function updateAndDisplayCreatures() {
         c.checkMitosis(colorCounts);
 
         if (c.size <= c.minSize) {
+            storeBestModelWeights(c); // Almacenar pesos del mejor modelo
             state.creatures.splice(i, 1); // Eliminar criaturas muertas
             continue;
         }
 
         for (let j = state.creatures.length - 1; j >= 0; j--) {
             if (i !== j && c.eatCreature(state.creatures[j])) {
+                storeBestModelWeights(c); // Almacenar pesos del mejor modelo
                 state.creatures.splice(j, 1);
                 break;
             }
         }
+    }
+}
+
+function storeBestModelWeights(creature) {
+    let score = creature.calculateScore();
+    state.topCreatures.push({ creature, score });
+    state.topCreatures.sort((a, b) => b.score - a.score);
+    if (state.topCreatures.length > 4) {
+        state.topCreatures.pop();
+    }
+}
+
+function checkAllCreaturesDead() {
+    if (state.creatures.length === 0) {
+        let bestWeights = state.topCreatures.map(entry => entry.creature.brain.model.getWeights().map(tensor => tensor.arraySync()));
+        initializeCreaturesAndFood(bestWeights);
     }
 }
 
@@ -130,9 +152,4 @@ function countColors(creatures) {
         colorCounts[creature.color]++;
     }
     return colorCounts;
-}
-
-export function updateMutationColorAndCount(newColor) {
-    state.currentMutationColor = newColor;
-    state.mutationCount = 0;
 }
