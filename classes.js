@@ -1,28 +1,64 @@
 import { v4 as uuidv4 } from 'uuid';
 import { state } from './logic.js';
 
-export class Food {
+const INITIAL_COLORS = ["red", "blue", "yellow", "green"];
+const AVAILABLE_COLORS = ["red", "blue", "yellow", "green"];
+const BORDER_THRESHOLD = 10;
+const BORDER_REPULSION_STRENGTH = 0.1;
+const FOOD_ATTRACTION_RANGE = 100;
+const SMOOTHING_FACTOR = 0.2;
+
+function getRandomColor() {
+    return AVAILABLE_COLORS[Math.floor(Math.random() * AVAILABLE_COLORS.length)];
+}
+
+function getInitialColor() {
+    return INITIAL_COLORS[Math.floor(Math.random() * INITIAL_COLORS.length)];
+}
+
+function map(value, start1, stop1, start2, stop2) {
+    return ((value - start1) / (stop1 - start1)) * (stop2 - start2) + start2;
+}
+
+function dist(pos1, pos2) {
+    let dx = pos1.x - pos2.x;
+    let dy = pos1.y - pos2.y;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+
+class Entity {
     constructor() {
-        this.id = uuidv4();
-        this.pos = { x: Math.random() * 1900, y: Math.random() * 800 };
-        this.type = Math.random() < 0.5 ? 'normal' : 'growth';
+        this.pos = { x: Math.random() * 1280, y: Math.random() * 720 };
         this.vel = { x: (Math.random() - 0.5) * 0.25, y: (Math.random() - 0.5) * 0.25 };
+    }
+
+    updatePosition() {
+        this.pos.x += this.vel.x;
+        this.pos.y += this.vel.y;
+    }
+
+    checkBorders() {
+        if (this.pos.x < 0 || this.pos.x > 1280) this.vel.x *= -1;
+        if (this.pos.y < 0 || this.pos.y > 720) this.vel.y *= -1;
+    }
+}
+
+export class Food extends Entity {
+    constructor() {
+        super();
+        this.id = uuidv4();
+        this.type = Math.random() < 0.5 ? 'normal' : 'growth';
         this.lifeTime = 3600; // Vida de 1 minuto (60 FPS * 60 segundos)
     }
 
     move() {
-        this.pos.x += this.vel.x;
-        this.pos.y += this.vel.y;
+        super.updatePosition();
         this.vel.x += (Math.random() - 0.5) * 0.025;
         this.vel.y += (Math.random() - 0.5) * 0.025;
         this.vel.x = Math.min(Math.max(this.vel.x, -0.125), 0.125);
         this.vel.y = Math.min(Math.max(this.vel.y, -0.125), 0.125);
-        this.checkBorders();
-    }
-
-    checkBorders() {
-        if (this.pos.x < 0 || this.pos.x > 1900) this.vel.x *= -1;
-        if (this.pos.y < 0 || this.pos.y > 800) this.vel.y *= -1;
+        super.checkBorders();
     }
 
     age() {
@@ -31,45 +67,69 @@ export class Food {
     }
 }
 
-export class Creature {
-    constructor(size = 11, pos = { x: Math.random() * 1900, y: Math.random() * 800 }, color = getInitialColor(), speedMultiplier = 1.0, id = uuidv4()) {
+export class Creature extends Entity {
+    constructor(size = 11, pos, color = getInitialColor(), speedMultiplier = 0.5, id = uuidv4()) {
+        super();
         this.id = id;
-        this.pos = pos;
-        this.vel = { x: 0, y: 0 };
-        this.acc = { x: 0, y: 0 };
+        this.pos = pos || { x: Math.random() * 1280, y: Math.random() * 720 };
         this.size = size;
         this.color = color;
         this.minSize = 5;
+        this.maxSize = 37.5;
         this.lifeSpan = 10000;
         this.timeSinceLastMeal = 0;
         this.speedMultiplier = speedMultiplier;
         this.energy = 100;
         this.olfatoRange = map(this.size, this.minSize, 100, 75, 250);
-        this.lastDirection = { x: 0, y: 0 };
         this.foodEaten = 0;
         this.preyEaten = 0;
         this.reproduced = false;
         this.ageCounter = 0;
         this.borderRepulsionAccum = { x: 0, y: 0 };
+        this.acc = { x: 0, y: 0 };
+        this.direction = 'right';  // Dirección inicial
+        state.creatureDirections.set(this.id, { pos: this.pos, vel: this.vel, direction: this.direction });
     }
 
-    applyForce(force) {
-        const smoothingFactor = 0.2;
-        this.acc.x += force.x * smoothingFactor;
-        this.acc.y += force.y * smoothingFactor;
-    }
     
 
+    applyForce(force) {
+        this.vel.x += force.x * SMOOTHING_FACTOR;
+        this.vel.y += force.y * SMOOTHING_FACTOR;
+    }
+
+
     move(food, creatures) {
+        const FRAME_RATE_MULTIPLIER = state.frameRateMultiplier;
+        const BASE_SPEED = this.speedMultiplier * FRAME_RATE_MULTIPLIER;
+
         this.ageCounter++;
-        let { closestNormalFood, closestGrowthFood, closestPrey, closestPredator } = this.findClosestEntities(food, creatures);
-        let { speed, action } = this.determineAction(closestNormalFood, closestGrowthFood, closestPrey, closestPredator);
+        const { closestNormalFood, closestGrowthFood, closestPrey, closestPredator } = this.findClosestEntities(food, creatures);
+        const { speed, action } = this.determineAction(closestNormalFood, closestGrowthFood, closestPrey, closestPredator, BASE_SPEED);
 
         this.performAction(action, closestNormalFood, closestGrowthFood, closestPrey, closestPredator, speed);
-        this.updateVelocityAndPosition();
+        this.updateVelocityAndPosition(FRAME_RATE_MULTIPLIER);
         this.handleBorders();
         this.reduceEnergy();
         this.checkEnergy();
+
+        this.updateDirection(); // Actualizar la dirección basada en la velocidad
+
+        // Actualizar dirección en el estado
+        state.creatureDirections.set(this.id, { pos: this.pos, vel: this.vel, direction: this.direction });
+    }
+
+    updateDirection() {
+        const angle = Math.atan2(this.vel.y, this.vel.x) * 180 / Math.PI;
+        if (angle >= -45 && angle < 45) {
+            this.direction = 'right';
+        } else if (angle >= 45 && angle < 135) {
+            this.direction = 'down';
+        } else if (angle >= -135 && angle < -45) {
+            this.direction = 'up';
+        } else {
+            this.direction = 'left';
+        }
     }
 
     findClosestEntities(food, creatures) {
@@ -77,7 +137,7 @@ export class Creature {
         let closestNormalFoodDist = Infinity, closestGrowthFoodDist = Infinity, closestPreyDist = Infinity, closestPredatorDist = Infinity;
 
         for (let f of food) {
-            let d = this.dist(this.pos, f.pos);
+            let d = dist(this.pos, f.pos);
             if (f.type === "normal" && d < closestNormalFoodDist && d < this.olfatoRange) {
                 closestNormalFoodDist = d;
                 closestNormalFood = f;
@@ -89,7 +149,7 @@ export class Creature {
 
         for (let other of creatures) {
             if (other.id !== this.id && other.color !== this.color) {
-                let d = this.dist(this.pos, other.pos);
+                let d = dist(this.pos, other.pos);
                 if (d < this.olfatoRange) {
                     if (other.size < this.size && d < closestPreyDist) {
                         closestPreyDist = d;
@@ -105,12 +165,8 @@ export class Creature {
         return { closestNormalFood, closestGrowthFood, closestPrey, closestPredator };
     }
 
-    determineAction(closestNormalFood, closestGrowthFood, closestPrey, closestPredator) {
-        let baseSpeed = 1.5 * this.speedMultiplier * state.frameRateMultiplier;
-        let speed = baseSpeed;
-        if (state.season === "winter") speed *= 0.5;
-        else if (state.season === "summer") speed *= 1.2;
-
+    determineAction(closestNormalFood, closestGrowthFood, closestPrey, closestPredator, BASE_SPEED) {
+        let speed = BASE_SPEED;
         let action = "wander";
         if (closestPredator) action = "flee";
         else if (closestPrey) action = "pursue";
@@ -142,90 +198,71 @@ export class Creature {
     }
 
     flee(predator, speed, closestNormalFood, closestGrowthFood) {
-        let flee = { x: this.pos.x - predator.pos.x, y: this.pos.y - predator.pos.y };
-        let mag = Math.sqrt(flee.x * flee.x + flee.y * flee.y);
-        flee.x = (flee.x / mag) * speed;
-        flee.y = (flee.y / mag) * speed;
-        let noiseFactor = 1;
-        flee.x += (Math.random() - 0.5) * noiseFactor * speed;
-        flee.y += (Math.random() - 0.5) * noiseFactor * speed;
-        flee.x = Math.min(Math.max(flee.x, -speed), speed);
-        flee.y = Math.min(Math.max(flee.y, -speed), speed);
+        let flee = this.calculateDirection(predator.pos, speed, true);
         let fleeWithFoodAttraction = this.addFoodAttraction(flee, speed, closestNormalFood, closestGrowthFood);
-        this.applyForce({ x: fleeWithFoodAttraction.x - this.vel.x, y: fleeWithFoodAttraction.y - this.vel.y });
+        this.applyForce(fleeWithFoodAttraction);
     }
 
     pursue(prey, speed, closestNormalFood, closestGrowthFood) {
-        let pursue = { x: prey.pos.x - this.pos.x, y: prey.pos.y - this.pos.y };
-        let mag = Math.sqrt(pursue.x * pursue.x + pursue.y * pursue.y);
-        pursue.x = (pursue.x / mag) * speed;
-        pursue.y = (pursue.y / mag) * speed;
-        let noiseFactor = 0.5;
-        pursue.x += (Math.random() - 0.5) * noiseFactor * speed;
-        pursue.y += (Math.random() - 0.5) * noiseFactor * speed;
-        pursue.x = Math.min(Math.max(pursue.x, -speed), speed);
-        pursue.y = Math.min(Math.max(pursue.y, -speed), speed);
+        let pursue = this.calculateDirection(prey.pos, speed);
         let pursueWithFoodAttraction = this.addFoodAttraction(pursue, speed, closestNormalFood, closestGrowthFood);
-        this.applyForce({ x: pursueWithFoodAttraction.x - this.vel.x, y: pursueWithFoodAttraction.y - this.vel.y });
+        this.applyForce(pursueWithFoodAttraction);
     }
 
     seekFood(food, speed) {
-        let desired = { x: food.pos.x - this.pos.x, y: food.pos.y - this.pos.y };
-        let mag = Math.sqrt(desired.x * desired.x + desired.y * desired.y);
-        desired.x = (desired.x / mag) * speed;
-        desired.y = (desired.y / mag) * speed;
-        this.applyForce({ x: desired.x - this.vel.x, y: desired.y - this.vel.y });
+        let desired = this.calculateDirection(food.pos, speed);
+        this.applyForce(desired);
     }
 
-    addFoodAttraction(direction, speed, closestNormalFood, closestGrowthFood) {
-        let foodAttractionRange = 100;
-        if (closestNormalFood && this.dist(this.pos, closestNormalFood.pos) < foodAttractionRange) {
-            let towardsFood = { x: closestNormalFood.pos.x - this.pos.x, y: closestNormalFood.pos.y - this.pos.y };
-            let mag = Math.sqrt(towardsFood.x * towardsFood.x + towardsFood.y * towardsFood.y);
-            towardsFood.x = (towardsFood.x / mag) * speed * 1.2;
-            towardsFood.y = (towardsFood.y / mag) * speed * 1.2;
-            direction.x += towardsFood.x;
-            direction.y += towardsFood.y;
-        } else if (closestGrowthFood && this.dist(this.pos, closestGrowthFood.pos) < foodAttractionRange) {
-            let towardsFood = { x: closestGrowthFood.pos.x - this.pos.x, y: closestGrowthFood.pos.y - this.pos.y };
-            let mag = Math.sqrt(towardsFood.x * towardsFood.x + towardsFood.y * towardsFood.y);
-            towardsFood.x = (towardsFood.x / mag) * speed * 1.5;
-            towardsFood.y = (towardsFood.y / mag) * speed * 1.5;
-            direction.x += towardsFood.x;
-            direction.y += towardsFood.y;
+    calculateDirection(targetPos, speed, isFlee = false) {
+        let direction = { x: targetPos.x - this.pos.x, y: targetPos.y - this.pos.y };
+        let mag = Math.sqrt(direction.x * direction.x + direction.y * direction.y);
+        direction.x = (direction.x / mag) * speed;
+        direction.y = (direction.y / mag) * speed;
+        if (isFlee) {
+            direction.x *= -1;
+            direction.y *= -1;
         }
         return direction;
     }
 
-    updateVelocityAndPosition() {
-        this.vel.x += this.acc.x;
-        this.vel.y += this.acc.y;
-        this.vel.x = Math.min(Math.max(this.vel.x, -this.speedMultiplier * state.frameRateMultiplier), this.speedMultiplier * state.frameRateMultiplier);
-        this.vel.y = Math.min(Math.max(this.vel.y, -this.speedMultiplier * state.frameRateMultiplier), this.speedMultiplier * state.frameRateMultiplier);
-        this.pos.x += this.vel.x;
-        this.pos.y += this.vel.y;
+    addFoodAttraction(direction, speed, closestNormalFood, closestGrowthFood) {
+        if (closestNormalFood && dist(this.pos, closestNormalFood.pos) < FOOD_ATTRACTION_RANGE) {
+            direction = this.adjustDirection(direction, closestNormalFood.pos, speed * 1.2);
+        } else if (closestGrowthFood && dist(this.pos, closestGrowthFood.pos) < FOOD_ATTRACTION_RANGE) {
+            direction = this.adjustDirection(direction, closestGrowthFood.pos, speed * 1.5);
+        }
+        return direction;
+    }
+
+    adjustDirection(direction, targetPos, speed) {
+        let towardsFood = { x: targetPos.x - this.pos.x, y: targetPos.y - this.pos.y };
+        let mag = Math.sqrt(towardsFood.x * towardsFood.x + towardsFood.y * towardsFood.y);
+        towardsFood.x = (towardsFood.x / mag) * speed;
+        towardsFood.y = (towardsFood.y / mag) * speed;
+        direction.x += towardsFood.x;
+        direction.y += towardsFood.y;
+        return direction;
+    }
+
+    updateVelocityAndPosition(FRAME_RATE_MULTIPLIER) {
+        this.vel.x = Math.min(Math.max(this.vel.x + this.acc.x, -this.speedMultiplier * FRAME_RATE_MULTIPLIER), this.speedMultiplier * FRAME_RATE_MULTIPLIER);
+        this.vel.y = Math.min(Math.max(this.vel.y + this.acc.y, -this.speedMultiplier * FRAME_RATE_MULTIPLIER), this.speedMultiplier * FRAME_RATE_MULTIPLIER);
+        this.pos.x = Math.min(Math.max(this.pos.x + this.vel.x, 0), 1280);
+        this.pos.y = Math.min(Math.max(this.pos.y + this.vel.y, 0), 720);
         this.acc.x = 0;
         this.acc.y = 0;
     }
 
     handleBorders() {
-        if (this.pos.x < 0) this.pos.x = 0;
-        if (this.pos.x > 1900) this.pos.x = 1900;
-        if (this.pos.y < 0) this.pos.y = 0;
-        if (this.pos.y > 800) this.pos.y = 800;
-
-        let borderThreshold = 10;
-        let borderRepulsionStrength = 0.1;
-
-        if (this.pos.x < borderThreshold) this.applyForce({ x: borderRepulsionStrength, y: 0 });
-        if (this.pos.x > 1900 - borderThreshold) this.applyForce({ x: -borderRepulsionStrength, y: 0 });
-        if (this.pos.y < borderThreshold) this.applyForce({ x: 0, y: borderRepulsionStrength });
-        if (this.pos.y > 800 - borderThreshold) this.applyForce({ x: 0, y: -borderRepulsionStrength });
+        if (this.pos.x < BORDER_THRESHOLD) this.applyForce({ x: BORDER_REPULSION_STRENGTH, y: 0 });
+        if (this.pos.x > 1280 - BORDER_THRESHOLD) this.applyForce({ x: -BORDER_REPULSION_STRENGTH, y: 0 });
+        if (this.pos.y < BORDER_THRESHOLD) this.applyForce({ x: 0, y: BORDER_REPULSION_STRENGTH });
+        if (this.pos.y > 720 - BORDER_THRESHOLD) this.applyForce({ x: 0, y: -BORDER_REPULSION_STRENGTH });
     }
 
     reduceEnergy() {
-        let distance = Math.sqrt(this.vel.x * this.vel.x + this.vel.y * this.vel.y);
-        this.energy -= distance * 0.08;
+        this.energy -= Math.sqrt(this.vel.x * this.vel.x + this.vel.y * this.vel.y) * 0.08;
     }
 
     checkEnergy() {
@@ -235,21 +272,13 @@ export class Creature {
     die() {
         let index = state.creatures.indexOf(this);
         if (index > -1) {
-            if (this.ageCounter > state.longestLivingDuration) {
-                state.longestLivingDuration = this.ageCounter;
-                state.longestLivingCreatures = [this];
-                console.log(`Nuevo récord de longevidad: ${this.ageCounter} ticks`);
-            } else if (this.ageCounter === state.longestLivingDuration) {
-                state.longestLivingCreatures.push(this);
-            }
             state.creatures.splice(index, 1);
         }
     }
 
     eat(food) {
         for (let i = food.length - 1; i >= 0; i--) {
-            let d = this.dist(this.pos, food[i].pos);
-            if (d < this.size) {
+            if (dist(this.pos, food[i].pos) < this.size) {
                 this.consumeFood(food[i]);
                 food.splice(i, 1);
                 this.borderRepulsionAccum.x = 0;
@@ -260,20 +289,21 @@ export class Creature {
     }
 
     consumeFood(food) {
-        if (food.type === "growth") {
-            this.size += 4;
-            this.energy += 200;
-        } else {
-            this.size += 2;
-            this.energy += 100;
+        if (this.size < this.maxSize) {
+            if (food.type === "growth") {
+                this.size = Math.min(this.size + 4, this.maxSize); // Limitar al tamaño máximo
+                this.energy += 200;
+            } else {
+                this.size = Math.min(this.size + 2, this.maxSize); // Limitar al tamaño máximo
+                this.energy += 100;
+            }
         }
         this.timeSinceLastMeal = 0;
         this.foodEaten++;
     }
 
     eatCreature(other) {
-        let d = this.dist(this.pos, other.pos);
-        if (d < this.size && this.size > other.size && this.color !== other.color) {
+        if (dist(this.pos, other.pos) < this.size && this.size > other.size && this.color !== other.color) {
             if (state.creatures.includes(other)) {
                 this.consumeCreature(other);
                 return true;
@@ -283,7 +313,9 @@ export class Creature {
     }
 
     consumeCreature(other) {
-        this.size += other.size / 2;
+        if (this.size < this.maxSize) {
+            this.size = Math.min(this.size + other.size / 2, this.maxSize); // Limitar al tamaño máximo
+        }
         this.timeSinceLastMeal = 0;
         this.energy += other.size * 50;
         this.preyEaten++;
@@ -300,41 +332,38 @@ export class Creature {
     }
 
     checkMitosis(colorCounts) {
-        if (this.size >= 37.5) this.reproduce(colorCounts);
+        if (this.size >= 37.5 && state.creatures.length < 10) {
+            this.reproduce(colorCounts);
+        }
     }
 
     reproduce(colorCounts) {
-        let numOffspring = this.calculateNumOffspring();
+        if (state.creatures.length >= 10) return; // No reproducir si ya hay 10 criaturas
+
+        let numOffspring = 3; // Constante fija
         let childSize = (this.size * 0.9) / numOffspring;
         let distance = this.size;
+        let halfOffspring = Math.ceil(numOffspring / 2);
 
         for (let i = 0; i < numOffspring; i++) {
-            let childColor = this.calculateChildColor(colorCounts);
+            if (state.creatures.length >= 10) break; // No crear más criaturas si ya hay 10
+
+            let isMutated = i < halfOffspring;
+            let childColor = this.calculateChildColor(colorCounts, isMutated);
             let childPos = this.generateChildPosition(distance);
-            let child = new Creature(childSize, childPos, childColor);
-            state.creatures.push(child);
+            state.creatures.push(new Creature(childSize, childPos, childColor));
         }
 
         this.size /= 3;
         if (this.size < this.minSize) this.size = this.minSize;
     }
 
-    calculateNumOffspring() {
-        switch (state.season) {
-            case "spring": return 5;
-            case "summer": return 4;
-            case "autumn": return Math.random() < 0.5 ? 4 : 3;
-            case "winter": return 3;
-            default: return 3;
-        }
-    }
-
-    calculateChildColor(colorCounts) {
+    calculateChildColor(colorCounts, forceMutation = false) {
         let childColor = this.color;
-        let mutationProbability = Math.min(0.1 * colorCounts[this.color], 0.9);
+        let mutationProbability = Math.min(0.5 * colorCounts.get(this.color), 0.9);
 
-        if (Math.random() < mutationProbability) {
-            if (state.currentMutationColor === null || state.mutationCount >= 10) {
+        if (forceMutation || Math.random() < mutationProbability) {
+            if (!state.currentMutationColor || state.mutationCount >= 10) {
                 state.currentMutationColor = getRandomColor();
                 state.mutationCount = 0;
             }
@@ -348,24 +377,4 @@ export class Creature {
         let angle = Math.random() * Math.PI * 2;
         return { x: this.pos.x + Math.cos(angle) * distance, y: this.pos.y + Math.sin(angle) * distance };
     }
-
-    dist(pos1, pos2) {
-        let dx = pos1.x - pos2.x;
-        let dy = pos1.y - pos2.y;
-        return Math.sqrt(dx * dx + dy * dy);
-    }
-}
-
-function getInitialColor() {
-    const initialColors = ["red", "blue", "yellow", "green"];
-    return initialColors[Math.floor(Math.random() * initialColors.length)];
-}
-
-function getRandomColor() {
-    let newColor = `rgb(${Math.floor(Math.random() * 256)}, ${Math.floor(Math.random() * 256)}, ${Math.floor(Math.random() * 256)})`;
-    return newColor;
-}
-
-function map(value, start1, stop1, start2, stop2) {
-    return ((value - start1) / (stop1 - start1)) * (stop2 - stop2) + start2;
 }

@@ -4,29 +4,26 @@ import { Food, Creature } from './classes.js';
 export const state = {
     currentMutationColor: null,
     mutationCount: 0,
-    frameRateMultiplier: 1,
-    season: "spring",
+    frameRateMultiplier: 0.5,
     food: [],
     creatures: [],
-    colorTraits: {},
-    longestLivingCreatures: [],
-    longestLivingDuration: 0,
+    colorTraits: new Map(),
     creatureIDCounter: 0,
     totalDays: 0,
-    foodRespawnTime: 50,
+    foodRespawnTime: 100,
     foodRespawnCounter: 0,
-    seasonCounter: 0,
-    seasonDuration: 3600, // 1 minuto en frames (60 FPS)
-    yearDuration: 3600 * 4, // 4 estaciones
-    timeCounter: 0 // Nuevo contador de tiempo
+    timeCounter: 0,
+    creatureDirections: new Map(), // Añadir esta línea para las direcciones de las criaturas
 };
 
 // Inicializa las criaturas y la comida
 function initializeCreaturesAndFood() {
     for (let i = 0; i < 5; i++) {
-        state.creatures.push(new Creature(11, undefined, undefined, 1.0, uuidv4())); // Aumentar tamaño inicial en un 10%
+        if (state.creatures.length < 10) {
+            state.creatures.push(new Creature(11, undefined, undefined, 1.0, uuidv4()));
+        }
     }
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 10; i++) {
         state.food.push(new Food());
     }
 }
@@ -35,9 +32,8 @@ function initializeCreaturesAndFood() {
 initializeCreaturesAndFood();
 
 export function updateState() {
-    state.timeCounter++; // Incrementa el contador de tiempo
+    state.timeCounter++;
     handleFoodRespawn();
-    handleSeasonChange();
     updateTotalDays();
     updateAndDisplayFood();
     updateAndDisplayCreatures();
@@ -51,40 +47,8 @@ function handleFoodRespawn() {
     }
 }
 
-function handleSeasonChange() {
-    state.seasonCounter++;
-    if (state.seasonCounter >= state.seasonDuration) {
-        state.seasonCounter = 0;
-        changeSeason();
-    }
-}
-
-function changeSeason() {
-    const seasons = ["spring", "summer", "autumn", "winter"];
-    let currentSeasonIndex = seasons.indexOf(state.season);
-    state.season = seasons[(currentSeasonIndex + 1) % seasons.length];
-    adjustFoodRespawnTimeBySeason();
-}
-
-function adjustFoodRespawnTimeBySeason() {
-    switch (state.season) {
-        case "spring":
-            state.foodRespawnTime = 10;
-            break;
-        case "summer":
-            state.foodRespawnTime = 50;
-            break;
-        case "autumn":
-            state.foodRespawnTime = 100;
-            break;
-        case "winter":
-            state.foodRespawnTime = 200;
-            break;
-    }
-}
-
 function updateTotalDays() {
-    state.totalDays = Math.floor(state.timeCounter / (state.yearDuration / 365));
+    state.totalDays = Math.floor(state.timeCounter / (state.foodRespawnTime * 7));
 }
 
 function updateAndDisplayFood() {
@@ -92,7 +56,7 @@ function updateAndDisplayFood() {
         let f = state.food[i];
         f.move();
         if (f.age()) {
-            state.food.splice(i, 1); // Eliminar comida caducada
+            state.food.splice(i, 1);
         }
     }
 }
@@ -102,18 +66,27 @@ function updateAndDisplayCreatures() {
 
     for (let i = state.creatures.length - 1; i >= 0; i--) {
         let c = state.creatures[i];
+        if (!c || !c.id) continue; // Verificar que la criatura y su id existan
         c.move(state.food, state.creatures);
         c.eat(state.food);
         c.age();
         c.checkMitosis(colorCounts);
 
+        // Guardar la dirección de la criatura
+        state.creatureDirections.set(c.id, { pos: c.pos, vel: c.vel, direction: c.direction });
+
         if (c.size <= c.minSize) {
             state.creatures.splice(i, 1); // Eliminar criaturas muertas
+            state.creatureDirections.delete(c.id); // Eliminar la dirección de la criatura
             continue;
         }
 
         for (let j = state.creatures.length - 1; j >= 0; j--) {
             if (i !== j && c.eatCreature(state.creatures[j])) {
+                // Verificar que la criatura existe antes de eliminar
+                if (state.creatures[j] && state.creatures[j].id) {
+                    state.creatureDirections.delete(state.creatures[j].id); // Eliminar la dirección de la criatura comida
+                }
                 state.creatures.splice(j, 1);
                 break;
             }
@@ -121,13 +94,11 @@ function updateAndDisplayCreatures() {
     }
 }
 
+
 function countColors(creatures) {
-    let colorCounts = {};
+    let colorCounts = new Map();
     for (let creature of creatures) {
-        if (!colorCounts[creature.color]) {
-            colorCounts[creature.color] = 0;
-        }
-        colorCounts[creature.color]++;
+        colorCounts.set(creature.color, (colorCounts.get(creature.color) || 0) + 1);
     }
     return colorCounts;
 }

@@ -1,10 +1,8 @@
-// server.js
-import { writeHeapSnapshot } from 'v8';
 import express from 'express';
 import cors from 'cors';
 import { WebSocketServer } from 'ws';
 import { Worker } from 'worker_threads';
-import { state, updateState } from './logic.js';
+import { state } from './logic.js';
 import zlib from 'zlib';
 
 const app = express();
@@ -17,16 +15,7 @@ const server = app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
 });
 
-setInterval(() => {
-    const memoryUsage = process.memoryUsage();
-    console.log(`RSS: ${memoryUsage.rss / 1024 / 1024} MB`);
-    console.log(`Heap Total: ${memoryUsage.heapTotal / 1024 / 1024} MB`);
-    console.log(`Heap Used: ${memoryUsage.heapUsed / 1024 / 1024} MB`);
-    console.log(`External: ${memoryUsage.external / 1024 / 1024} MB`);
-}, 1000);
-
 const wss = new WebSocketServer({ server });
-
 const connections = new Set();
 
 // Crear un único worker para manejar la actualización de estado
@@ -75,8 +64,4 @@ wss.on('connection', ws => {
     });
 });
 
-// Actualizar el estado periódicamente
-setInterval(() => {
-    updateState();
-    worker.postMessage({ action: 'update' });
-}, 1000);
+// Eliminar el setInterval adicional ya que el worker maneja la actualización del estado

@@ -9,7 +9,7 @@ parentPort.on('message', (message) => {
             intervalId = setInterval(() => {
                 updateState();
                 parentPort.postMessage(state);
-            }, 15);
+            }, 10);
         }
     } else if (message.action === 'stop') {
         if (intervalId) {
