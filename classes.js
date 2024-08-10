@@ -339,24 +339,27 @@ export class Creature extends Entity {
 
     reproduce(colorCounts) {
         if (state.creatures.length >= 10) return; // No reproducir si ya hay 10 criaturas
-
+    
         let numOffspring = 3; // Constante fija
         let childSize = (this.size * 0.9) / numOffspring;
         let distance = this.size;
-        let halfOffspring = Math.ceil(numOffspring / 2);
-
+    
+        // Copiar los colores disponibles y eliminar el color del padre
+        let availableColors = [...AVAILABLE_COLORS].filter(color => color !== this.color);
+    
         for (let i = 0; i < numOffspring; i++) {
-            if (state.creatures.length >= 10) break; // No crear más criaturas si ya hay 10
-
-            let isMutated = i < halfOffspring;
-            let childColor = this.calculateChildColor(colorCounts, isMutated);
+            if (state.creatures.length >= 10 || availableColors.length === 0) break; // No crear más criaturas si ya hay 10 o no hay colores disponibles
+    
+            // Seleccionar un color único para cada hijo
+            let childColor = availableColors.splice(Math.floor(Math.random() * availableColors.length), 1)[0];
             let childPos = this.generateChildPosition(distance);
             state.creatures.push(new Creature(childSize, childPos, childColor));
         }
-
+    
         this.size /= 3;
         if (this.size < this.minSize) this.size = this.minSize;
     }
+    
 
     calculateChildColor(colorCounts, forceMutation = false) {
         let childColor = this.color;
